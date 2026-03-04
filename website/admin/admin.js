@@ -84,6 +84,7 @@ function refreshCustomers() {
     }
     return Promise.resolve();
 }
+window.refreshCustomers = refreshCustomers; // Allow database.js to call with active filters
 
 /**
  * Trigger refresh of Billing list with current filters
@@ -141,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Wait a bit for Supabase to initialize, then load data
     setTimeout(() => {
         initializeSorting();
+        initializeNotificationsUI(); // Initialize notification bell + dropdown
         loadInitialData();
     }, 100);
 });
@@ -186,7 +188,8 @@ async function loadInitialData() {
             window.dbOperations.loadStaff(),
             refreshBilling(),
             window.dbOperations.loadAreaBoxes(),
-            window.dbOperations.loadReadingList() // Pre-fetch in background
+            window.dbOperations.loadReadingList(), // Pre-fetch in background
+            loadNotifications() // Load latest alerts
         ]);
 
         // Fail-safe: Hide loading overlay after 5 seconds no matter what
@@ -273,6 +276,11 @@ function setupRealtimeSubscriptions() {
         if (window.dbOperations && window.dbOperations.loadSettings) {
             window.dbOperations.loadSettings();
         }
+    });
+
+    // Subscribe to notifications for cutoff-done alerts
+    subscribeToTable('notifications', () => {
+        loadNotifications();
     });
 }
 
@@ -1416,6 +1424,14 @@ function showLogoutModal(onConfirm) {
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Show modal with activation logic
+    const modal = document.getElementById('logoutModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
     document.getElementById('confirmLogoutBtn').addEventListener('click', () => {
         closeModal('logoutModal');
         if (onConfirm) onConfirm();
@@ -1448,7 +1464,7 @@ function initializeTheme() {
 
     // Apply saved theme
     if (savedTheme === 'dark') {
-        document.body.classList.add('dark-theme');
+        document.documentElement.classList.add('dark-theme');
         if (themeToggle) {
             themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
             themeToggle.style.color = '#FFD700'; // Gold Sun
@@ -1462,7 +1478,7 @@ function initializeTheme() {
 
 function toggleTheme() {
     const themeToggle = document.getElementById('themeToggle');
-    const isDark = document.body.classList.toggle('dark-theme');
+    const isDark = document.documentElement.classList.toggle('dark-theme');
 
     // Update icon and save preference
     if (isDark) {
@@ -1478,6 +1494,10 @@ function toggleTheme() {
             themeToggle.style.color = '#0288D1'; // Original Blue Moon
         }
     }
+
+    // Refresh charts to update theme-dependent elements (like center text)
+    if (typeof consumptionChart !== 'undefined' && consumptionChart) consumptionChart.update();
+    if (typeof paymentStatusChart !== 'undefined' && paymentStatusChart) paymentStatusChart.update();
 }
 
 // === CHART MANAGEMENT ===
@@ -1558,17 +1578,21 @@ function updateDashboardCharts(data) {
                     const { ctx, chartArea: { top, bottom, left, right, width, height } } = chart;
                     ctx.save();
 
+                    const isDark = document.documentElement.classList.contains('dark-theme');
+                    const centerX = left + width / 2;
+                    const centerY = top + height / 2;
+
                     // Draw "TOTAL" label
                     ctx.font = '500 12px Inter';
-                    ctx.fillStyle = '#64748B';
+                    ctx.fillStyle = isDark ? '#9CA3AF' : '#64748B';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText('TOTAL BILLS', width / 2, height / 2 - 15 + top);
+                    ctx.fillText('TOTAL BILLS', centerX, centerY - 12);
 
                     // Draw the count
                     ctx.font = 'bold 36px Inter';
-                    ctx.fillStyle = document.body.classList.contains('dark-theme') ? '#F9FAFB' : '#1E293B';
-                    ctx.fillText(chart.config.options.plugins.centerText.text, width / 2, height / 2 + 18 + top);
+                    ctx.fillStyle = isDark ? '#F9FAFB' : '#1E293B';
+                    ctx.fillText(chart.config.options.plugins.centerText.text, centerX, centerY + 18);
 
                     ctx.restore();
                 }
@@ -2018,4 +2042,155 @@ function initializeRateEditing() {
             showEditRateModal(category);
         });
     });
+}
+
+// === NOTIFICATIONS LOGIC ===
+function initializeNotificationsUI() {
+    const bellBtn = document.getElementById('notificationBellBtn');
+    const dropdown = document.getElementById('notificationDropdown');
+    const markAllReadBtn = document.getElementById('markAllReadBtn');
+
+    if (!bellBtn || !dropdown) return;
+
+    // Toggle dropdown
+    bellBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = dropdown.style.display === 'flex';
+        dropdown.style.display = isVisible ? 'none' : 'flex';
+    });
+
+    // Close on click outside
+    document.addEventListener('click', (e) => {
+        if (!dropdown.contains(e.target) && !bellBtn.contains(e.target)) {
+            dropdown.style.display = 'none';
+        }
+    });
+
+    // Mark all as read
+    if (markAllReadBtn) {
+        markAllReadBtn.addEventListener('click', async () => {
+            await markAllRead();
+        });
+    }
+}
+
+async function loadNotifications() {
+    const badge = document.getElementById('notificationBadge');
+    const list = document.getElementById('notificationList');
+    if (!list) return;
+
+    try {
+        const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        if (error) throw error;
+
+        // Update badge (count unread)
+        const unreadCount = data.filter(n => !n.is_read).length;
+        if (badge) {
+            if (unreadCount > 0) {
+                badge.style.display = 'flex';
+                badge.textContent = unreadCount > 9 ? '9+' : unreadCount;
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        // Render list
+        if (data.length === 0) {
+            list.innerHTML = '<div style="padding: 30px 20px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">No new notifications</div>';
+            return;
+        }
+
+        list.innerHTML = data.map(n => {
+            const iconSvg = n.type === 'cutoff_done' 
+                ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M4.93 19.07L19.07 4.93"/></svg>` 
+                : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
+            
+            const iconClass = n.type === 'cutoff_done' ? 'cutoff-done' : 'default';
+            
+            return `
+                <div class="notification-item ${n.is_read ? '' : 'unread'}" 
+                     onclick="handleNotificationClick('${n.id}', ${n.customer_id})">
+                    <div style="display: flex; align-items: flex-start; gap: 12px;">
+                        <div class="notification-icon-wrapper ${iconClass}">
+                            ${iconSvg}
+                        </div>
+                        <div class="notification-content">
+                            <p class="notification-message">${n.message}</p>
+                            <span class="notification-time">${formatTimeAgo(new Date(n.created_at))}</span>
+                        </div>
+                        ${!n.is_read ? '<div class="unread-dot"></div>' : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        console.error('Load Notifications Error:', err);
+    }
+}
+
+async function markAllRead() {
+    try {
+        const { error } = await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('is_read', false);
+
+        if (error) throw error;
+        loadNotifications();
+    } catch (err) {
+        console.error('Mark All Read Error:', err);
+    }
+}
+
+window.handleNotificationClick = async function(id, customerId) {
+    try {
+        // Mark as read
+        await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('id', id);
+
+        // Close dropdown
+        document.getElementById('notificationDropdown').style.display = 'none';
+        
+        // Reload notifications
+        loadNotifications();
+
+        // Navigate to customer if customerId exists
+        if (customerId) {
+            window.navigateToCustomer(customerId);
+        }
+    } catch (err) {
+        console.error('Notification Click Error:', err);
+    }
+};
+
+window.navigateToCustomer = function(customerId) {
+    const customersNavItem = document.querySelector('.nav-item[data-page="customers"]');
+    if (customersNavItem) {
+        // Set search ID to target customer
+        const searchInput = document.getElementById('customerSearch');
+        if (searchInput && typeof getAccountID === 'function') {
+            searchInput.value = getAccountID(customerId);
+        }
+        
+        // Trigger navigation
+        customersNavItem.click();
+    }
+};
+
+function formatTimeAgo(date) {
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000);
+
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+    return date.toLocaleDateString();
 }

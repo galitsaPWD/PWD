@@ -200,7 +200,7 @@
             // 2. Fetch customer details
             const { data: customer, error: customerError } = await supabase
                 .from('customers')
-                .select('id, last_name, first_name, has_discount')
+                .select('id, last_name, first_name, has_discount, status')
                 .eq('id', bill.customer_id)
                 .single();
 
@@ -224,13 +224,19 @@
             let penaltyAmount = 0;
             if (shouldApplyPenalty) {
                 const penaltyRate = (parseFloat(settings.penalty_percentage) || 20) / 100;
-                // Calculate base + consumption (approximate from balance if exact breakdown not available, 
-                // but ideally should be base + consumption. For now, use bill.amount as proxy for base+consumption if arrears are 0)
-                // A safer simple bet: Penalty on the *current balance* 
                 penaltyAmount = parseFloat(bill.balance) * penaltyRate;
             }
 
             const totalDue = parseFloat(bill.balance) + penaltyAmount;
+
+            const cutoffGrace = settings ? (settings.cutoff_days || settings.cutoff_grace_period || 30) : 30;
+            
+            let isForCutoff = false;
+            if (bill.due_date) {
+                const diffTime = today - dueDate;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                isForCutoff = (bill.status === 'overdue' || bill.status === 'unpaid') && diffDays >= cutoffGrace;
+            }
 
             const modalHTML = `
                 <div class="modal-overlay" id="${modalId}">
@@ -256,6 +262,12 @@
                                     <span>Bill Balance:</span>
                                     <strong>₱${parseFloat(bill.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
                                 </div>
+                                
+                                ${isForCutoff ? `
+                                <div class="info-row status-danger" style="background: rgba(239, 68, 68, 0.1); padding: 8px; border-radius: 4px; margin-top: 8px; justify-content: center; animation: pulse 2s infinite;">
+                                    <strong style="color: #ef4444;"><i class="fas fa-exclamation-triangle"></i> ACCOUNT FOR CUTOFF</strong>
+                                </div>
+                                ` : ''}
                                 
                                 ${penaltyAmount > 0 ? `
                                 <div class="info-row text-danger">
@@ -297,12 +309,13 @@
                                         <strong id="paymentChange" style="color: #2e7d32;">₱0.00</strong>
                                     </div>
                                 </div>
-
-                                <div class="modal-actions" style="margin-top: 1.5rem;">
-                                    <button type="button" class="btn btn-outline" onclick="closeModal('${modalId}')">Cancel</button>
-                                    <button type="submit" class="btn btn-primary" style="flex: 1;">Finalize Payment</button>
-                                </div>
                             </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-outline" onclick="closeModal('${modalId}')" style="min-width: 100px;">Cancel</button>
+                            <button type="submit" id="finalizePaymentBtn" form="paymentForm" class="btn btn-primary" style="flex: 1; min-height: 44px; font-weight: 700;">
+                                <i class="fas fa-check-circle" style="margin-right: 8px;"></i> Finalize Payment
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -332,19 +345,55 @@
 
             form.onsubmit = async (e) => {
                 e.preventDefault();
-                const submitBtn = form.querySelector('button[type="submit"]');
-                submitBtn.disabled = true;
-                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+                const submitBtn = document.getElementById('finalizePaymentBtn');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+                }
 
                 try {
                     const received = parseFloat(amountInput.value);
                     const method = methodSelect.value;
                     const reference = document.getElementById('onlineReference').value;
 
-                    await window.cashierDb.recordPayment(billId, received, method, reference);
+                    const result = await window.cashierDb.recordPayment(billId, received, method, reference);
 
                     showNotification('Payment recorded successfully!', 'success');
                     closeModal(modalId);
+
+                    // Check for reactivation if customer was inactive and balance is now 0
+                    if (customer.status === 'inactive' && result.total_balance <= 0) {
+                        const confirmReactivate = confirm(`Customer ${customer.last_name} has cleared their total balance. Reactivate account now?`);
+                        if (confirmReactivate) {
+                            try {
+                                await window.cashierDb.reactivateCustomer(customer.id);
+                                showNotification('Customer reactivated successfully!', 'success');
+                                
+                                // Notify Admin
+                                if (typeof supabase !== 'undefined') {
+                                    await supabase.from('notifications').insert([{
+                                        customer_id: customer.id,
+                                        message: `Customer ${customer.last_name}, ${customer.first_name} paid in full and was REACTIVATED.`,
+                                        type: 'activation',
+                                        is_read: false
+                                    }]);
+                                }
+                            } catch (reactError) {
+                                console.error('Delayed reactivation failed:', reactError);
+                                showNotification('Reactivation failed, but payment was recorded.', 'error');
+                            }
+                        } else {
+                            // Notify Admin that they paid but remain inactive
+                            if (typeof supabase !== 'undefined') {
+                                await supabase.from('notifications').insert([{
+                                    customer_id: customer.id,
+                                    message: `Customer ${customer.last_name}, ${customer.first_name} paid in full but remains INACTIVE.`,
+                                    type: 'payment',
+                                    is_read: false
+                                }]);
+                            }
+                        }
+                    }
 
                     if (typeof loadInitialData === 'function') loadInitialData();
 

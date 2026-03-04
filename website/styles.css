@@ -186,7 +186,7 @@ body {
 
 .form-input {
     width: 100%;
-    padding: 1rem 1rem 1rem 3rem;
+    padding: 1rem 3rem 1rem 3rem;
     font-size: 0.9375rem;
     font-family: 'Inter', sans-serif;
     color: var(--text-primary);
@@ -422,80 +422,83 @@ body {
     outline-offset: 2px;
 }
 
-/* === NOTIFICATION SYSTEM (PREMIUM) === */
-.notification {
+/* === NOTIFICATION SYSTEM (PREMIUM & COMPACT) === */
+#notificationContainer {
     position: fixed;
     top: 24px;
     right: 24px;
+    z-index: 10000;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.notification {
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    padding: 16px 20px;
-    border-radius: 16px;
-    box-shadow:
-        0 4px 6px -1px rgba(0, 0, 0, 0.05),
-        0 10px 15px -3px rgba(0, 0, 0, 0.05),
+    padding: 12px 18px;
+    border-radius: 12px;
+    box-shadow: 
+        0 10px 15px -3px rgba(0, 0, 0, 0.1),
+        0 4px 6px -2px rgba(0, 0, 0, 0.05),
         0 0 0 1px rgba(0, 0, 0, 0.05);
-    /* Subtle border ring */
     display: flex;
     align-items: center;
-    gap: 14px;
-    z-index: 9999;
-    transform: translateX(120%) scale(0.95);
-    transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-    /* Bouncy enter */
-    min-width: 320px;
-    max-width: 420px;
+    gap: 12px;
+    pointer-events: auto;
+    transform: translateX(120%);
+    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    min-width: 280px;
+    max-width: 380px;
 }
 
 .notification.show {
-    transform: translateX(0) scale(1);
+    transform: translateX(0);
 }
 
-.notification svg {
+.notification i {
+    font-size: 1.25rem;
     flex-shrink: 0;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.05));
 }
 
 .notification span {
-    font-size: 0.95rem;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-primary);
     line-height: 1.4;
-    letter-spacing: -0.01em;
 }
 
 /* Success State */
 .notification.success {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(240, 253, 244, 0.95));
+    border-left: 4px solid #16A34A;
 }
 
-.notification.success svg circle {
-    fill: #DCFCE7;
-}
-
-.notification.success svg path {
-    stroke: #16A34A;
+.notification.success i {
+    color: #16A34A;
 }
 
 /* Error State */
 .notification.error {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(254, 242, 242, 0.95));
+    border-left: 4px solid #DC2626;
 }
 
-.notification.error svg circle {
-    fill: #FEE2E2;
+.notification.error i {
+    color: #DC2626;
 }
 
-.notification.error svg path {
-    stroke: #DC2626;
-    fill: #DC2626;
+/* Info State */
+.notification.info {
+    border-left: 4px solid var(--primary);
+}
+
+.notification.info i {
+    color: var(--primary);
 }
 
 /* Hover Effect */
 .notification:hover {
-    transform: translateX(0) scale(1.02) translateY(-2px);
-    box-shadow:
-        0 20px 25px -5px rgba(0, 0, 0, 0.08),
-        0 10px 10px -5px rgba(0, 0, 0, 0.03);
+    transform: translateX(-5px);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
 }

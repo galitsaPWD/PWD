@@ -52,33 +52,7 @@ function initializeForm() {
 }
 
 // === NOTIFICATION SYSTEM ===
-function showNotification(message, type = 'info') {
-    const existing = document.querySelector('.notification');
-    if (existing) existing.remove();
-
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-
-    const icon = type === 'success' ?
-        '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill="#E8F5E9"/><path d="M6 10L9 13L14 8" stroke="#2E7D32" stroke-width="2" stroke-linecap="round"/></svg>' :
-        '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill="#FFEBEE"/><path d="M10 6V10" stroke="#C62828" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="14" r="1" fill="#C62828"/></svg>';
-
-    notification.innerHTML = `
-        ${icon}
-        <span>${message}</span>
-    `;
-
-    document.body.appendChild(notification);
-
-    // Animate in
-    setTimeout(() => notification.classList.add('show'), 10);
-
-    // Remove after 3s
-    setTimeout(() => {
-        notification.classList.remove('show');
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
-}
+// Using shared showNotification from shared/utils.js
 
 // === LOGIN LOGIC (SUPABASE AUTH) ===
 async function handleLogin() {

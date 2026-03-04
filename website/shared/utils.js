@@ -55,7 +55,7 @@
 
         const options = {
             year: 'numeric',
-            month: 'short',
+            month: 'long',
             day: 'numeric'
         };
         if (includeTime) {
@@ -69,23 +69,39 @@
      * Notification Helper
      */
     function showNotification(message, type = 'info') {
-        const container = document.getElementById('notificationContainer');
-        if (!container) return;
+        let container = document.getElementById('notificationContainer');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'notificationContainer';
+            // Simple default styling if first use
+            container.style.cssText = 'position: fixed; top: 24px; right: 24px; z-index: 10000; pointer-events: none; display: flex; flex-direction: column; gap: 12px;';
+            document.body.appendChild(container);
+        }
 
         const notification = document.createElement('div');
-        notification.className = `notification ${type} slide-in`;
+        notification.className = `notification ${type}`;
+        
+        const icon = type === 'success' ? 
+            '<i class="fas fa-check-circle"></i>' : 
+            (type === 'error' ? '<i class="fas fa-exclamation-circle"></i>' : '<i class="fas fa-info-circle"></i>');
+
         notification.innerHTML = `
-            <div class="notification-content">
-                <i class="fas ${type === 'success' ? 'fa-check-circle' : (type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle')}"></i>
+            <div class="notification-content" style="display: flex; align-items: center; gap: 12px; pointer-events: auto;">
+                ${icon}
                 <span>${message}</span>
             </div>
         `;
 
         container.appendChild(notification);
+        
+        // Trigger show animation
+        setTimeout(() => notification.classList.add('show'), 10);
+
+        // Remove after delay
         setTimeout(() => {
-            notification.classList.replace('slide-in', 'slide-out');
+            notification.classList.remove('show');
             setTimeout(() => notification.remove(), 500);
-        }, 3000);
+        }, 3500);
     }
 
     /**
@@ -122,19 +138,21 @@
             // If already has a toggle in its parent wrapper, just attach event
             // Otherwise wrap it and add the toggle
             let wrapper = input.parentElement;
-            if (!wrapper.classList.contains('password-wrapper')) {
+            if (!wrapper.classList.contains('password-input-wrapper') && 
+                !wrapper.classList.contains('password-wrapper') &&
+                !wrapper.classList.contains('password-input-wrapper-elegant')) {
                 wrapper = document.createElement('div');
-                wrapper.className = 'password-wrapper';
+                wrapper.className = 'password-input-wrapper';
                 input.parentNode.insertBefore(wrapper, input);
                 wrapper.appendChild(input);
             }
 
             // Check if toggle button already exists
-            let toggle = wrapper.querySelector('.toggle-password, .password-toggle');
+            let toggle = wrapper.querySelector('.toggle-password, .password-toggle, .pass-toggle');
             if (!toggle) {
                 toggle = document.createElement('button');
                 toggle.type = 'button';
-                toggle.className = 'toggle-password';
+                toggle.className = 'pass-toggle';
                 toggle.setAttribute('aria-label', 'Toggle password visibility');
                 toggle.innerHTML = '<i class="fas fa-eye"></i>';
                 wrapper.appendChild(toggle);

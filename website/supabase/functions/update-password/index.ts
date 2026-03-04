@@ -113,11 +113,9 @@ serve(async (req) => {
 
     if (updateError) throw updateError
 
-    // Sync Staff Table
-    await supabaseAdmin
-      .from('staff')
-      .update({ password: newPassword })
-      .eq('auth_uid', uid)
+    // Sync Staff Table - We no longer store plain-text passwords in the staff table
+    // Removing the update({ password: newPassword }) call to avoid schema cache errors
+    console.log('Password updated in Auth, skipping staff table plain-text sync.');
 
     return new Response(
       JSON.stringify({ success: true, message: 'Password updated successfully' }),

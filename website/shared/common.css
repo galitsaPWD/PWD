@@ -43,6 +43,7 @@
 /* Dark Theme Overrides */
 .dark-theme,
 body.dark-theme {
+    color-scheme: dark;
     --bg-primary: #111827;
     --bg-secondary: #1F2937;
     --card-bg: #1F2937;
@@ -140,15 +141,20 @@ body {
 
 .modal {
     background: var(--modal-bg);
-    border-radius: 16px;
-    padding: 2rem;
-    box-shadow: var(--card-shadow);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-radius: 20px;
+    box-shadow: 
+        0 25px 50px -12px rgba(0, 0, 0, 0.5),
+        0 0 0 1px var(--glass-border) inset;
     max-width: 90vw;
     width: 600px;
     position: relative;
-    max-height: 90vh;
-    overflow-y: auto;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
     border: 1px solid var(--glass-border);
+    animation: slideInModal 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modal-header {
@@ -167,19 +173,28 @@ body {
 }
 
 /* Notifications */
-.notification {
+#notificationContainer {
     position: fixed;
-    bottom: 24px;
+    top: 24px;
     right: 24px;
+    z-index: 10000;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.notification {
+    position: relative;
     padding: 1rem 1.5rem;
     border-radius: 12px;
     background: var(--card-bg);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-    z-index: 3000;
     display: flex;
     align-items: center;
     gap: 12px;
     border-left: 4px solid var(--primary);
+    pointer-events: auto;
 }
 
 .notification.success {
@@ -538,18 +553,22 @@ body {
 
 .modal {
     background: var(--modal-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
     width: 100%;
     max-width: 550px;
-    border-radius: 20px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25),
+    border-radius: 24px;
+    box-shadow: 
+        0 25px 50px -12px rgba(0, 0, 0, 0.4),
         0 0 0 1px var(--glass-border) inset,
-        0 0 40px rgba(0, 0, 0, 0.3);
-    overflow: hidden;
+        0 0 40px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
     position: relative;
+    max-height: 92vh;
     animation: slideUpModal 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     border: 1px solid var(--glass-border);
+    overflow: hidden; /* Outer bound clip */
 }
 
 @keyframes slideUpModal {
@@ -597,7 +616,29 @@ body {
 }
 
 .modal-body {
-    padding: 1.5rem;
+    padding: 1.5rem 2rem;
+    overflow-y: auto;
+    flex: 1;
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary) transparent;
+}
+
+.modal-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+    background-color: var(--primary);
+    border-radius: 10px;
+}
+
+.modal-footer {
+    padding: 1.25rem 2rem;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    background: rgba(255, 255, 255, 0.03);
 }
 
 /* --- Stats Cards --- */

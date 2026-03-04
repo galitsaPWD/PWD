@@ -192,11 +192,26 @@
         }
     }
 
+    async function reactivateCustomer(customerId) {
+        try {
+            const { data, error } = await supabase.rpc('reactivate_customer', {
+                p_customer_id: customerId
+            });
+
+            if (error) throw error;
+            return true;
+        } catch (error) {
+            console.error('Error reactivating customer:', error);
+            throw error;
+        }
+    }
+
     // Export to window
     window.cashierDb = {
         generateBillFromReading,
         recordPayment,
         loadSystemSettings,
-        verifyOnlinePayment
+        verifyOnlinePayment,
+        reactivateCustomer
     };
 })();

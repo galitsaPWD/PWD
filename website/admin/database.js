@@ -69,14 +69,21 @@ async function loadCustomers(options = {}) {
     if (!tbody) return;
 
     try {
-        const { data, error } = await supabase
+        let query = supabase
             .from('customers')
             .select('*')
             .order(sortBy, { ascending: sortOrder === 'asc' });
 
+        // Apply status filter server-side for accuracy
+        if (status) {
+            query = query.eq('status', status);
+        }
+
+        const { data, error } = await query;
+
         if (error) throw error;
 
-        // Enhanced multi-dimensional filtering
+        // Client-side filtering for search, type, barangay
         const filteredData = data.filter(c => {
             const lowSearch = search.toLowerCase();
             const matchesSearch = !search ||
@@ -85,11 +92,10 @@ async function loadCustomers(options = {}) {
                 (c.address || '').toLowerCase().includes(lowSearch) ||
                 getAccountID(c.id).toLowerCase().includes(lowSearch);
 
-            const matchesStatus = !status || (c.status || 'active').toLowerCase() === status.toLowerCase();
             const matchesType = !type || (c.customer_type || '').toLowerCase() === type.toLowerCase();
             const matchesBarangay = !barangay || (c.address || '').toLowerCase().includes(barangay.toLowerCase());
 
-            return matchesSearch && matchesStatus && matchesType && matchesBarangay;
+            return matchesSearch && matchesType && matchesBarangay;
         });
 
         if (filteredData.length === 0) {
@@ -188,7 +194,9 @@ async function updateCustomer(id, customerData) {
 
         if (error) throw error;
         showNotification('Customer updated successfully', 'success');
-        loadCustomers();
+        // Preserve active filter/search state when refreshing
+        if (window.refreshCustomers) window.refreshCustomers();
+        else loadCustomers();
     } catch (error) {
         console.error('Error updating customer:', error);
         showNotification('Failed to update customer', 'error');
@@ -205,7 +213,9 @@ async function deleteCustomer(id) {
 
         if (error) throw error;
         showNotification('Customer deleted successfully!', 'success');
-        loadCustomers();
+        // Preserve active filter/search state when refreshing
+        if (window.refreshCustomers) window.refreshCustomers();
+        else loadCustomers();
     } catch (error) {
         console.error('Error deleting customer:', error);
         showNotification('Failed to delete customer', 'error');
@@ -302,7 +312,6 @@ async function addStaff(staffData) {
                 role: staffData.role,
                 contact_number: staffData.contact,
                 username: staffData.username,
-                password: staffData.password, // Plain text for now as per system design
                 status: staffData.status || 'active'
             }]);
 
@@ -334,10 +343,7 @@ async function updateStaff(id, staffData) {
             updated_at: new Date()
         };
 
-        // Only include password if provided
-        if (staffData.password && staffData.password.trim() !== '') {
-            updateData.password = staffData.password;
-        }
+        // Password storage removed as it's handled by Supabase Auth
 
         const { error } = await supabase
             .from('staff')
@@ -529,9 +535,18 @@ async function loadBilling(filters = {}) {
         if (window.dbOperations && window.dbOperations.loadSystemSettings) {
             settings = await window.dbOperations.loadSystemSettings();
         }
-        const cutoffGrace = settings ? (settings.cutoff_grace_period || 3) : 3;
+        const cutoffGrace = settings ? (settings.cutoff_days || settings.cutoff_grace_period || 30) : 30;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+
+        // Auto-update overdue status (Keep consistent with Cashier)
+        data.forEach(bill => {
+            if (bill.status === 'unpaid' && bill.due_date && new Date(bill.due_date) < today) {
+                bill.status = 'overdue';
+                // Background update (don't await to keep UI fast)
+                supabase.from('billing').update({ status: 'overdue' }).eq('id', bill.id).then();
+            }
+        });
 
         if (status) {
             if (status === 'cutoff') {
@@ -593,14 +608,36 @@ async function loadBilling(filters = {}) {
                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
                 if (diffDays >= cutoffGrace) {
-                    cutoffWarning = `<span class="cutoff-warning inline" title="Days overdue: ${diffDays}">⚠️ FOR CUTOFF</span>`;
+                    cutoffWarning = `
+                        <div class="balance-info-trigger" style="margin-left: 8px;">
+                            <i class="fas fa-exclamation-triangle text-danger" style="cursor: help; animation: pulse 2s infinite; font-size: 0.9rem;"></i>
+                            <div class="balance-tooltip" style="width: 200px;">
+                                <div class="tooltip-header" style="color: #ef4444; border-bottom-color: rgba(239, 68, 68, 0.2);">Disconnection Alert</div>
+                                <div class="tooltip-row">
+                                    <span>Urgency</span>
+                                    <span style="color: #ef4444; font-weight: 800;">CRITICAL</span>
+                                </div>
+                                <div class="tooltip-row">
+                                    <span>Days Overdue</span>
+                                    <span>${diffDays} Days</span>
+                                </div>
+                                <div class="tooltip-row" style="font-size: 0.75rem; opacity: 0.8; white-space: normal; margin-top: 4px; line-height: 1.3;">
+                                    Account is eligible for cutoff due to overdue balance exceeding grace period.
+                                </div>
+                                <div class="tooltip-footer" style="color: #ef4444; border-top-color: rgba(239, 68, 68, 0.2);">
+                                    <span>STATUS</span>
+                                    <span>FOR CUTOFF</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
                 }
             }
 
             return `
             <tr data-id="${bill.id}" data-customer-id="${bill.customer_id}">
-                <td class="bill-id">#BIL-${String(bill.id).padStart(4, '0')}</td>
-                <td>
+                <td class="bill-id col-bill-id">#BIL-${String(bill.id).padStart(4, '0')}</td>
+                <td class="col-customer">
                     <div class="customer-column">
                         <span class="customer-name">${customerName}</span>
                         <div class="customer-meta">
@@ -610,17 +647,19 @@ async function loadBilling(filters = {}) {
                         </div>
                     </div>
                 </td>
-                <td>${bill.billing_period || 'N/A'}</td>
-                <td class="amount">₱${parseFloat(bill.amount).toLocaleString()}</td>
-                <td>${formatLocalDateTime(bill.due_date, false)}</td>
-                <td>
-                    <span class="badge ${bill.status === 'paid' ? 'success' : (bill.status === 'overdue' ? 'danger' : 'warning')}">
-                        ${bill.status.charAt(0).toUpperCase() + bill.status.slice(1)}
-                    </span>
-                    ${cutoffWarning}
+                <td class="col-period">${normalizePeriod(bill.billing_period) || 'N/A'}</td>
+                <td class="amount col-amount">₱${parseFloat(bill.amount).toLocaleString()}</td>
+                <td class="col-due-date">${formatLocalDateTime(bill.due_date, false)}</td>
+                <td class="col-status">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span class="badge ${bill.status === 'paid' ? 'success' : (bill.status === 'overdue' ? 'danger' : 'warning')}">
+                            ${bill.status.charAt(0).toUpperCase() + bill.status.slice(1)}
+                        </span>
+                        ${cutoffWarning}
+                    </div>
                 </td>
-                <td class="balance ${bill.balance > 0 ? 'negative' : 'positive'}">₱${parseFloat(bill.balance).toLocaleString()}</td>
-                <td>
+                <td class="balance col-balance ${bill.balance > 0 ? 'negative' : 'positive'}">₱${parseFloat(bill.balance).toLocaleString()}</td>
+                <td class="col-actions">
                     <div class="action-buttons">
                         <button class="btn-icon" title="View Bill"><i class="fas fa-file-invoice"></i></button>
                         <button class="btn-icon" title="View Ledger"><i class="fas fa-book"></i></button>
@@ -1272,7 +1311,7 @@ async function loadSystemSettings() {
         if (document.getElementById('settingDiscount')) document.getElementById('settingDiscount').value = data[0].discount_percentage;
         if (document.getElementById('settingPenalty')) document.getElementById('settingPenalty').value = data[0].penalty_percentage;
         if (document.getElementById('settingOverdueDays')) document.getElementById('settingOverdueDays').value = data[0].overdue_days || 14;
-        if (document.getElementById('settingCutoffGrace')) document.getElementById('settingCutoffGrace').value = data[0].cutoff_grace_period || 3;
+        if (document.getElementById('settingCutoffGrace')) document.getElementById('settingCutoffGrace').value = data[0].cutoff_days || data[0].cutoff_grace_period || 30;
 
         return data[0];
     } catch (error) {

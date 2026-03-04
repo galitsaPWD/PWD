@@ -18,6 +18,7 @@ DECLARE
     v_new_balance DECIMAL;
     v_new_status VARCHAR;
     v_bill_customer_id INTEGER;
+    v_total_remaining_balance DECIMAL;
     v_result JSONB;
 BEGIN
     -- Get current bill details
@@ -48,6 +49,11 @@ BEGIN
         updated_at = NOW()
     WHERE id = p_bill_id;
 
+    -- Calculate TOTAL remaining balance for this customer across ALL bills
+    SELECT COALESCE(SUM(balance), 0) INTO v_total_remaining_balance
+    FROM billing
+    WHERE customer_id = v_bill_customer_id;
+
     -- Record Online Payment (if applicable)
     IF p_method != 'cash' THEN
         INSERT INTO online_payments (
@@ -60,6 +66,8 @@ BEGIN
     v_result := jsonb_build_object(
         'success', true,
         'new_balance', v_new_balance,
+        'total_balance', v_total_remaining_balance,
+        'customer_id', v_bill_customer_id,
         'status', v_new_status
     );
 
@@ -139,15 +147,36 @@ BEGIN
 END;
 $$;
 
--- 3. ENABLE REALTIME
+-- 3. REACTIVATE CUSTOMER RPC
+CREATE OR REPLACE FUNCTION reactivate_customer(
+    p_customer_id INTEGER
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE customers
+    SET 
+        status = 'active',
+        updated_at = NOW()
+    WHERE id = p_customer_id;
+
+    -- Note: This will trigger the Reader App to reset if they have Realtime enabled on customers table
+    RETURN jsonb_build_object('success', true);
+END;
+$$;
+
+-- 4. ENABLE REALTIME
 -- This is CRITICAL for the "live" updates to work on the Cashier/Admin side.
-ALTER PUBLICATION supabase_realtime ADD TABLE billing;
-ALTER PUBLICATION supabase_realtime ADD TABLE customers;
+-- (Already added in previous version, keeping for completeness if rerunning)
+-- ALTER PUBLICATION supabase_realtime ADD TABLE billing;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE customers;
 
--- 4. GRANT PERMISSIONS
-GRANT EXECUTE ON FUNCTION record_payment(INTEGER, DECIMAL, VARCHAR, VARCHAR) TO anon;
-GRANT EXECUTE ON FUNCTION generate_bill(INTEGER, DECIMAL, DECIMAL, DATE, DECIMAL, DECIMAL, DATE) TO anon;
+-- 5. GRANT PERMISSIONS
+GRANT EXECUTE ON FUNCTION record_payment TO anon;
+GRANT EXECUTE ON FUNCTION generate_bill TO anon;
+GRANT EXECUTE ON FUNCTION reactivate_customer TO anon;
 
--- Grant access to online_payments table for the RPC to work internally if needed (though SECURITY DEFINER handles it)
--- But just in case
+-- Grant access to online_payments table
 GRANT INSERT ON online_payments TO anon; 

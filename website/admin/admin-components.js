@@ -47,84 +47,195 @@ window.openModal = openModal;
  */
 function showCustomerModal() {
     const modalHTML = `
-        <div class="modal-overlay" id="customerModal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h3>Add New Customer</h3>
-                    <button class="modal-close" onclick="closeModal('customerModal')">
+        <div class="modal-overlay premium-modal-overlay" id="customerModal">
+            <div class="premium-modal-card" style="max-width: 480px; width: 95%;">
+                <div class="premium-header-accent"></div>
+                <div class="premium-modal-body" style="padding: 1.25rem 1.75rem;">
+                    <button class="modal-close-btn" onclick="closeModal('customerModal')">
                         <i class="fas fa-times"></i>
                     </button>
+
+                    <div class="stepper-header" style="margin-bottom: 0.5rem;">
+                        <div class="stepper-progress-bar" style="left: 0.5rem; right: 0.5rem; height: 1px;">
+                            <div class="stepper-progress-fill" id="customerStepperFill"></div>
+                        </div>
+                        <div class="stepper-steps">
+                            <div class="step-item active" id="custStep1Indicator">
+                                <div class="step-number" style="width: 22px; height: 22px; font-size: 0.75rem;">1</div>
+                                <span class="step-label" style="font-size: 0.65rem;">Personal</span>
+                            </div>
+                            <div class="step-item" id="custStep2Indicator">
+                                <div class="step-number" style="width: 22px; height: 22px; font-size: 0.75rem;">2</div>
+                                <span class="step-label" style="font-size: 0.65rem;">Service</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form class="premium-form" id="customerForm">
+                        <!-- Step 1: Personal Information -->
+                        <div class="modal-step active" id="custStep1">
+                            <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
+                                <i class="fas fa-user-plus"></i>
+                            </div>
+                            <h2 class="premium-modal-title" style="font-size: 1.05rem; margin-bottom: 0.1rem;">Customer Profile</h2>
+                            <p class="premium-modal-subtitle" style="margin-bottom: 0.75rem; font-size: 0.8rem;">Basic personal details.</p>
+                            
+                            <div class="form-section no-border">
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant flex-2">
+                                        <label>Last Name *</label>
+                                        <input type="text" name="lastName" placeholder="e.g. Dela Cruz" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-2">
+                                        <label>First Name *</label>
+                                        <input type="text" name="firstName" placeholder="e.g. Juan" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-1">
+                                        <label>M.I.</label>
+                                        <input type="text" name="middleInitial" placeholder="A" maxlength="1" />
+                                    </div>
+                                </div>
+                                <div class="form-group-elegant">
+                                    <label>Contact Number *</label>
+                                    <input type="tel" name="contact" placeholder="09XX XXX XXXX" required />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step 2: Property & Service -->
+                        <div class="modal-step" id="custStep2">
+                            <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
+                                <i class="fas fa-home"></i>
+                            </div>
+                            <h2 class="premium-modal-title" style="font-size: 1.05rem; margin-bottom: 0.1rem;">Service Details</h2>
+                            <p class="premium-modal-subtitle" style="margin-bottom: 0.75rem; font-size: 0.8rem;">Property and account specifics.</p>
+
+                            <div class="form-section no-border">
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant">
+                                        <label>Barangay *</label>
+                                        <select name="address" class="elegant-select" required>
+                                            <option value="">-- Select --</option>
+                                            ${(window.PULUPANDAN_BARANGAYS || []).map(b => `<option value="${b}">${b}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    <div class="form-group-elegant">
+                                        <label>Customer Type *</label>
+                                        <select name="customerType" class="elegant-select" required>
+                                            <option value="residential">Residential</option>
+                                            <option value="commercial-a">Commercial A</option>
+                                            <option value="commercial-b">Commercial B</option>
+                                            <option value="full-commercial">Full Commercial</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant">
+                                        <label>Meter Number *</label>
+                                        <input type="text" name="meterNumber" placeholder="Serial No." required />
+                                    </div>
+                                    <div class="form-group-elegant">
+                                        <label>Initial Status</label>
+                                        <select name="status" class="elegant-select">
+                                            <option value="active">Active</option>
+                                            <option value="inactive">Inactive</option>
+                                            <option value="pending">Pending</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group-elegant checkbox-form-group" style="margin-top: 0.5rem;">
+                                     <label class="checkbox-label premium-cb" style="padding: 0.5rem; border-radius: 10px;">
+                                        <input type="checkbox" name="discount" value="true" />
+                                        <div class="cb-text">
+                                            <span class="cb-title" style="font-size: 0.85rem;">Senior / PWD Discount</span>
+                                            <span class="cb-sub" style="font-size: 0.7rem;">Apply ${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 20}% off</span>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.75rem;">
+                            <button type="button" class="btn-premium-secondary" id="custBtnBack" style="display: none; padding: 0.5rem 1rem;">
+                                <i class="fas fa-arrow-left"></i> Back
+                            </button>
+                            <button type="button" class="btn-premium-primary" id="custBtnNext" style="padding: 0.5rem 1.5rem; margin-left: auto;">
+                                Next <i class="fas fa-arrow-right"></i>
+                            </button>
+                            <button type="submit" class="btn-premium-primary" id="custBtnSubmit" style="display: none; margin-left: auto; padding: 0.5rem 1.5rem;">
+                                <i class="fas fa-save"></i> Save Customer
+                            </button>
+                        </div>
+                    </form>
                 </div>
-                <form class="modal-form" id="customerForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Last Name *</label>
-                            <input type="text" name="lastName" required />
-                        </div>
-                        <div class="form-group">
-                            <label>First Name *</label>
-                            <input type="text" name="firstName" required />
-                        </div>
-                        <div class="form-group mi-group">
-                            <label>M.I.</label>
-                            <input type="text" name="middleInitial" />
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Contact Number *</label>
-                            <input type="tel" name="contact" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Barangay *</label>
-                            <select name="address" required>
-                                <option value="">-- Select Barangay --</option>
-                                ${(window.PULUPANDAN_BARANGAYS || []).map(b => `<option value="${b}">${b}</option>`).join('')}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Meter Number *</label>
-                            <input type="text" name="meterNumber" required />
-                        </div>
-                        <div class="form-group">
-                            <label>Customer Type *</label>
-                            <select name="customerType" required>
-                                <option value="residential">Residential</option>
-                                <option value="commercial-a">Commercial A</option>
-                                <option value="commercial-b">Commercial B</option>
-                                <option value="full-commercial">Full Commercial</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Status</label>
-                            <select name="status">
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
-                                <option value="pending">Pending</option>
-                            </select>
-                        </div>
-                        <div class="form-group checkbox-form-group">
-                             <label class="alignment-label">&nbsp;</label>
-                             <label class="checkbox-label">
-                                <input type="checkbox" name="discount" value="true" />
-                                <span>PWD / Senior Citizen Discount (${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 20}% off)</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('customerModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Add Customer</button>
-                    </div>
-                </form>
             </div>
         </div>
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Show modal
+    const modal = document.getElementById('customerModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
+    // Stepper Logic
+    let currentStep = 1;
+    const totalSteps = 2;
+    const btnNext = document.getElementById('custBtnNext');
+    const btnBack = document.getElementById('custBtnBack');
+    const btnSubmit = document.getElementById('custBtnSubmit');
+    const fill = document.getElementById('customerStepperFill');
+
+    function updateStepper() {
+        document.querySelectorAll('#customerModal .modal-step').forEach(s => s.classList.remove('active'));
+        document.getElementById(`custStep${currentStep}`).classList.add('active');
+
+        document.querySelectorAll('#customerModal .step-item').forEach((item, idx) => {
+            if (idx + 1 < currentStep) {
+                item.classList.add('completed');
+                item.classList.remove('active');
+            } else if (idx + 1 === currentStep) {
+                item.classList.add('active');
+                item.classList.remove('completed');
+            } else {
+                item.classList.remove('active', 'completed');
+            }
+        });
+
+        fill.style.width = currentStep === 1 ? '0%' : '100%';
+        btnBack.style.display = currentStep === 1 ? 'none' : 'flex';
+        btnNext.style.display = currentStep === totalSteps ? 'none' : 'flex';
+        btnSubmit.style.display = currentStep === totalSteps ? 'flex' : 'none';
+    }
+
+    btnNext.addEventListener('click', () => {
+        const step1 = document.getElementById('custStep1');
+        const inputs = step1.querySelectorAll('input[required]');
+        let valid = true;
+        inputs.forEach(i => {
+            if (!i.value) {
+                i.style.borderColor = 'var(--danger)';
+                valid = false;
+            } else {
+                i.style.borderColor = '';
+            }
+        });
+
+        if (!valid) {
+            showNotification('Please fill in all personal details.', 'error');
+            return;
+        }
+        currentStep++;
+        updateStepper();
+    });
+
+    btnBack.addEventListener('click', () => {
+        currentStep--;
+        updateStepper();
+    });
 
     document.getElementById('customerForm').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -132,11 +243,20 @@ function showCustomerModal() {
         const customer = Object.fromEntries(formData);
         customer.discount = formData.get('discount') === 'true';
 
+        const submitBtn = document.getElementById('custBtnSubmit');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+
         try {
             await window.dbOperations.addCustomer(customer);
             closeModal('customerModal');
+            showNotification('Customer added successfully!', 'success');
         } catch (error) {
             console.error('Failed to add customer:', error);
+            showNotification('Failed to add customer.', 'error');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
         }
     });
 }
@@ -147,77 +267,208 @@ window.showCustomerModal = showCustomerModal;
  */
 function showStaffModal() {
     const modalHTML = `
-        <div class="modal-overlay" id="staffModal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h3>Add New Staff</h3>
-                    <button class="modal-close" onclick="closeModal('staffModal')">
+        <div class="modal-overlay premium-modal-overlay" id="staffModal">
+            <div class="premium-modal-card" style="max-width: 480px; width: 95%;">
+                <div class="premium-header-accent"></div>
+                <div class="premium-modal-body" style="padding: 1.25rem 1.75rem;">
+                    <button class="modal-close-btn" onclick="closeModal('staffModal')">
                         <i class="fas fa-times"></i>
                     </button>
+
+                    <div class="stepper-header" style="margin-bottom: 0.5rem;">
+                        <div class="stepper-progress-bar" style="left: 0.5rem; right: 0.5rem; height: 1px;">
+                            <div class="stepper-progress-fill" id="stepperFill"></div>
+                        </div>
+                        <div class="stepper-steps">
+                            <div class="step-item active" id="step1Indicator">
+                                <div class="step-number" style="width: 22px; height: 22px; font-size: 0.75rem;">1</div>
+                                <span class="step-label" style="font-size: 0.65rem;">Personal</span>
+                            </div>
+                            <div class="step-item" id="step2Indicator">
+                                <div class="step-number" style="width: 22px; height: 22px; font-size: 0.75rem;">2</div>
+                                <span class="step-label" style="font-size: 0.65rem;">Security</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form class="premium-form" id="staffForm">
+                        <!-- Step 1: Personal Information -->
+                        <div class="modal-step active" id="modalStep1">
+                            <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
+                                <i class="fas fa-id-card"></i>
+                            </div>
+                            <h2 class="premium-modal-title" style="font-size: 1.05rem; margin-bottom: 0.1rem;">Personal Details</h2>
+                            <p class="premium-modal-subtitle" style="margin-bottom: 0.75rem; font-size: 0.8rem;">Basic identification.</p>
+                            
+                            <div class="form-section no-border">
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant flex-2">
+                                        <label>Last Name *</label>
+                                        <input type="text" name="lastName" placeholder="e.g. Dela Cruz" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-2">
+                                        <label>First Name *</label>
+                                        <input type="text" name="firstName" placeholder="e.g. Juan" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-1">
+                                        <label>M.I.</label>
+                                        <input type="text" name="middleInitial" placeholder="A" maxlength="1" />
+                                    </div>
+                                </div>
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant">
+                                        <label>Role *</label>
+                                        <select name="role" class="elegant-select" required>
+                                            <option value="cashier">Cashier</option>
+                                            <option value="reader">Meter Reader</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group-elegant">
+                                        <label>Contact Number *</label>
+                                        <input type="tel" name="contact" placeholder="09XX XXX XXXX" required />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step 2: Authentication -->
+                        <div class="modal-step" id="modalStep2">
+                            <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
+                                <i class="fas fa-shield-alt"></i>
+                            </div>
+                            <h2 class="premium-modal-title" style="font-size: 1.05rem; margin-bottom: 0.1rem;">Security & Status</h2>
+                            <p class="premium-modal-subtitle" style="margin-bottom: 0.75rem; font-size: 0.8rem;">Login credentials.</p>
+
+                            <div class="form-section no-border">
+                                <div class="form-group-elegant" style="margin-bottom: 0.75rem;">
+                                    <label style="font-size: 0.7rem;">Username *</label>
+                                    <div class="input-with-hint-elegant">
+                                        <input type="text" name="username" placeholder="Enter username" />
+                                        <span class="input-hint-elegant" style="font-size: 0.7rem; margin-top: 2px;">Login: <span class="hint-dynamic-elegant">username</span>@gmail.com</span>
+                                    </div>
+                                </div>
+                                <div class="form-row-elegant" style="gap: 1rem;">
+                                    <div class="form-group-elegant password-field">
+                                        <label style="font-size: 0.7rem;">Password *</label>
+                                        <div class="password-input-wrapper-elegant">
+                                            <input type="password" id="staffPassword" name="password" placeholder="••••••••" minlength="6" />
+                                        </div>
+                                    </div>
+                                    <div class="form-group-elegant password-field">
+                                        <label style="font-size: 0.7rem;">Confirm Password *</label>
+                                        <div class="password-input-wrapper-elegant">
+                                            <input type="password" id="staffConfirmPassword" placeholder="••••••••" minlength="6" />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-group-elegant" style="margin-top: 0.75rem;">
+                                    <label style="font-size: 0.7rem;">Operational Status</label>
+                                    <select name="status" class="elegant-select" style="padding: 0.6rem 0.875rem; font-size: 0.9rem;">
+                                        <option value="active">Active</option>
+                                        <option value="inactive">Inactive</option>
+                                        <option value="pending">Pending</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.75rem;">
+                            <button type="button" class="btn-premium-secondary" id="btnBack" style="display: none; padding: 0.5rem 1rem;">
+                                <i class="fas fa-arrow-left"></i> Back
+                            </button>
+                            <button type="button" class="btn-premium-primary" id="btnNext" style="padding: 0.5rem 1.5rem; margin-left: auto;">
+                                Next <i class="fas fa-arrow-right"></i>
+                            </button>
+                            <button type="submit" class="btn-premium-primary" id="btnSubmit" style="display: none; margin-left: auto; padding: 0.5rem 1.5rem;">
+                                <i class="fas fa-user-check"></i> Register
+                            </button>
+                        </div>
+                    </form>
                 </div>
-                <form class="modal-form" id="staffForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Last Name *</label>
-                            <input type="text" name="lastName" required />
-                        </div>
-                        <div class="form-group">
-                            <label>First Name *</label>
-                            <input type="text" name="firstName" required />
-                        </div>
-                        <div class="form-group mi-group">
-                            <label>M.I.</label>
-                            <input type="text" name="middleInitial" />
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Role *</label>
-                            <select name="role" required>
-                                <option value="cashier">Cashier</option>
-                                <option value="reader">Meter Reader</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Contact Number *</label>
-                            <input type="tel" name="contact" required />
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Username *</label>
-                            <input type="text" name="username" required />
-                            <small style="color: #666; font-size: 0.85rem;">Login will be: username@gmail.com</small>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Password *</label>
-                            <input type="password" id="staffPassword" name="password" required minlength="6" />
-                        </div>
-                        <div class="form-group">
-                            <label>Confirm Password *</label>
-                            <input type="password" id="staffConfirmPassword" required minlength="6" />
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Status</label>
-                        <select name="status">
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
-                            <option value="pending">Pending</option>
-                        </select>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('staffModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Add Staff</button>
-                    </div>
-                </form>
             </div>
         </div>
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+
+    const modal = document.getElementById('staffModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
+    // Stepper Navigation Logic
+    let currentStep = 1;
+    const totalSteps = 2;
+    const btnNext = document.getElementById('btnNext');
+    const btnBack = document.getElementById('btnBack');
+    const btnSubmit = document.getElementById('btnSubmit');
+    const fill = document.getElementById('stepperFill');
+
+    function updateStepper() {
+        // Handle Content
+        document.querySelectorAll('.modal-step').forEach(s => s.classList.remove('active'));
+        document.getElementById(`modalStep${currentStep}`).classList.add('active');
+
+        // Handle Indicators
+        document.querySelectorAll('.step-item').forEach((item, idx) => {
+            if (idx + 1 < currentStep) {
+                item.classList.add('completed');
+                item.classList.remove('active');
+            } else if (idx + 1 === currentStep) {
+                item.classList.add('active');
+                item.classList.remove('completed');
+            } else {
+                item.classList.remove('active', 'completed');
+            }
+        });
+
+        // Handle Progress Bar
+        fill.style.width = currentStep === 1 ? '0%' : '100%';
+
+        // Handle Actions
+        btnBack.style.display = currentStep === 1 ? 'none' : 'flex';
+        btnNext.style.display = currentStep === totalSteps ? 'none' : 'flex';
+        btnSubmit.style.display = currentStep === totalSteps ? 'flex' : 'none';
+    }
+
+    btnNext.addEventListener('click', () => {
+        // Basic validation for Step 1
+        const step1 = document.getElementById('modalStep1');
+        const inputs = step1.querySelectorAll('input[required], select[required]');
+        let valid = true;
+        inputs.forEach(i => {
+            if (!i.value) {
+                i.style.borderColor = 'var(--danger)';
+                valid = false;
+            } else {
+                i.style.borderColor = '';
+            }
+        });
+
+        if (!valid) {
+            showNotification('Please fill in all required personal details.', 'error');
+            return;
+        }
+
+        currentStep++;
+        updateStepper();
+    });
+
+    btnBack.addEventListener('click', () => {
+        currentStep--;
+        updateStepper();
+    });
+
+    // Dynamic username hint logic
+    const usernameInput = modal.querySelector('input[name="username"]');
+    const dynamicHint = modal.querySelector('.hint-dynamic-elegant');
+    if (usernameInput && dynamicHint) {
+        usernameInput.addEventListener('input', (e) => {
+            const val = e.target.value || 'username';
+            dynamicHint.textContent = val;
+        });
+    }
 
     // Initialize password toggles
     if (window.initPasswordToggles) {
@@ -227,10 +478,24 @@ function showStaffModal() {
     document.getElementById('staffForm').addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        // Validate password match
-        const password = document.getElementById('staffPassword').value;
+        // Validate missing fields in Step 2
+        const formData = new FormData(e.target);
+        const username = formData.get('username');
+        const password = formData.get('password');
         const confirmPassword = document.getElementById('staffConfirmPassword').value;
 
+        if (!username || !password || !confirmPassword) {
+            showNotification('Please fill in all authentication details.', 'error');
+            return;
+        }
+
+        // Validate password match
+        if (!password || !confirmPassword) {
+            showNotification('Please fill in all authentication details.', 'error');
+            return;
+        }
+
+        // Validate password match
         if (password !== confirmPassword) {
             showNotification('Passwords do not match!', 'error');
             return;
@@ -241,8 +506,6 @@ function showStaffModal() {
             return;
         }
 
-        const formData = new FormData(e.target);
-        const username = formData.get('username');
         const email = `${username}@gmail.com`; // Auto-generate email
 
         const submitBtn = e.target.querySelector('button[type="submit"]');
@@ -385,6 +648,14 @@ async function showAreaBoxModal(box = null) {
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Show modal
+    const modal = document.getElementById('boxModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
     renderSelectedBarangayTags();
 
     const form = document.getElementById('areaBoxForm');
@@ -484,6 +755,14 @@ window.showBarangaySelector = function (currentBoxId = null) {
     subContainer.id = 'subModalContainer';
     document.body.appendChild(subContainer);
     subContainer.innerHTML = selectorHTML;
+
+    // Show sub-modal
+    const modal = document.getElementById('barangaySelectorModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
     renderFullBarangayList('', assignments);
 };
 
@@ -581,6 +860,13 @@ async function showBillModal(billId) {
             </div>
         `;
         document.getElementById('modalContainer').innerHTML = modalHTML;
+
+        // Show modal
+        const modal = document.getElementById('billModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            setTimeout(() => modal.classList.add('active'), 10);
+        }
     } catch (error) {
         console.error('Error showing bill modal:', error);
         showNotification('Failed to load bill details', 'error');
@@ -614,85 +900,175 @@ function editCustomer(customerId, row, cells) {
     };
 
     const modalHTML = `
-        <div class="modal-overlay" id="editCustomerModal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h3>Edit Customer - #${String(customerId).padStart(3, '0')}</h3>
-                    <button class="modal-close" onclick="closeModal('editCustomerModal')">
+        <div class="modal-overlay premium-modal-overlay" id="editCustomerModal">
+            <div class="premium-modal-card" style="max-width: 480px; width: 95%;">
+                <div class="premium-header-accent"></div>
+                <div class="premium-modal-body" style="padding: 1.25rem 1.75rem;">
+                    <button class="modal-close-btn" onclick="closeModal('editCustomerModal')">
                         <i class="fas fa-times"></i>
                     </button>
+
+                    <div class="stepper-header" style="margin-bottom: 0.5rem;">
+                        <div class="stepper-progress-bar" style="left: 0.5rem; right: 0.5rem; height: 1px;">
+                            <div class="stepper-progress-fill" id="editCustFill"></div>
+                        </div>
+                        <div class="stepper-steps">
+                            <div class="step-item active" id="editCustStep1Ind">
+                                <div class="step-number" style="width: 22px; height: 22px; font-size: 0.75rem;">1</div>
+                                <span class="step-label" style="font-size: 0.65rem;">Personal</span>
+                            </div>
+                            <div class="step-item" id="editCustStep2Ind">
+                                <div class="step-number" style="width: 22px; height: 22px; font-size: 0.75rem;">2</div>
+                                <span class="step-label" style="font-size: 0.65rem;">Service</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form class="premium-form" id="editCustomerForm">
+                        <div class="modal-step active" id="editCustStep1">
+                            <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
+                                <i class="fas fa-user-edit"></i>
+                            </div>
+                            <h2 class="premium-modal-title" style="font-size: 1.05rem; margin-bottom: 0.1rem;">Edit Profile</h2>
+                            <p class="premium-modal-subtitle" style="margin-bottom: 0.75rem; font-size: 0.8rem;">ID: #${String(customerId).padStart(3, '0')}</p>
+
+                            <div class="form-section no-border">
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant flex-2">
+                                        <label>Last Name *</label>
+                                        <input type="text" name="lastName" value="${customer.lastName}" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-2">
+                                        <label>First Name *</label>
+                                        <input type="text" name="firstName" value="${customer.firstName}" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-1">
+                                        <label>M.I.</label>
+                                        <input type="text" name="middleInitial" value="${customer.middleInitial}" maxlength="1" />
+                                    </div>
+                                </div>
+                                <div class="form-group-elegant">
+                                    <label>Contact Number *</label>
+                                    <input type="tel" name="contact" value="${customer.contact}" required />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="modal-step" id="editCustStep2">
+                            <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
+                                <i class="fas fa-map-marker-alt"></i>
+                            </div>
+                            <h2 class="premium-modal-title" style="font-size: 1.05rem; margin-bottom: 0.1rem;">Service Info</h2>
+                            <p class="premium-modal-subtitle" style="margin-bottom: 0.75rem; font-size: 0.8rem;">Property specifics.</p>
+
+                            <div class="form-section no-border">
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant">
+                                        <label>Barangay *</label>
+                                        <select name="address" class="elegant-select" required>
+                                            ${(window.PULUPANDAN_BARANGAYS || []).map(b => `<option value="${b}" ${customer.address === b ? 'selected' : ''}>${b}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    <div class="form-group-elegant">
+                                        <label>Customer Type *</label>
+                                        <select name="customerType" class="elegant-select" required>
+                                            <option value="residential" ${customer.type === 'residential' ? 'selected' : ''}>Residential</option>
+                                            <option value="commercial-a" ${customer.type === 'commercial-a' ? 'selected' : ''}>Comm A</option>
+                                            <option value="commercial-b" ${customer.type === 'commercial-b' ? 'selected' : ''}>Comm B</option>
+                                            <option value="full-commercial" ${customer.type === 'full-commercial' ? 'selected' : ''}>Full Comm</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant">
+                                        <label>Meter Number *</label>
+                                        <input type="text" name="meterNumber" value="${customer.meterNumber}" required />
+                                    </div>
+                                    <div class="form-group-elegant">
+                                        <label>Account Status</label>
+                                        <select name="status" class="elegant-select">
+                                            <option value="active" ${customer.status === 'active' ? 'selected' : ''}>Active</option>
+                                            <option value="inactive" ${customer.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group-elegant checkbox-form-group" style="margin-top: 0.5rem;">
+                                     <label class="checkbox-label premium-cb" style="padding: 0.5rem; border-radius: 10px;">
+                                        <input type="checkbox" name="discount" value="true" ${customer.discount ? 'checked' : ''} />
+                                        <div class="cb-text">
+                                            <span class="cb-title" style="font-size: 0.85rem;">Senior / PWD Discount</span>
+                                            <span class="cb-sub" style="font-size: 0.7rem;">Apply ${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 20}% off</span>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.75rem;">
+                            <button type="button" class="btn-premium-secondary" id="editCustBack" style="display: none; padding: 0.5rem 1rem;">
+                                <i class="fas fa-arrow-left"></i> Back
+                            </button>
+                            <button type="button" class="btn-premium-primary" id="editCustNext" style="padding: 0.5rem 1.5rem; margin-left: auto;">
+                                Next <i class="fas fa-arrow-right"></i>
+                            </button>
+                            <button type="submit" class="btn-premium-primary" id="editCustSubmit" style="display: none; margin-left: auto; padding: 0.5rem 1.5rem;">
+                                <i class="fas fa-check-circle"></i> Update
+                            </button>
+                        </div>
+                    </form>
                 </div>
-                <form class="modal-form" id="editCustomerForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Last Name *</label>
-                            <input type="text" name="lastName" required value="${customer.lastName}" />
-                        </div>
-                        <div class="form-group">
-                            <label>First Name *</label>
-                            <input type="text" name="firstName" required value="${customer.firstName}" />
-                        </div>
-                        <div class="form-group mi-group">
-                            <label>M.I.</label>
-                            <input type="text" name="middleInitial" value="${customer.middleInitial}" />
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Contact Number *</label>
-                            <input type="tel" name="contact" required value="${customer.contact}" />
-                        </div>
-                        <div class="form-group">
-                            <label>Barangay *</label>
-                            <select name="address" required>
-                                ${(window.PULUPANDAN_BARANGAYS || []).map(b => `
-                                    <option value="${b}" ${customer.address === b ? 'selected' : ''}>${b}</option>
-                                `).join('')}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Meter Number *</label>
-                            <input type="text" name="meterNumber" required value="${customer.meterNumber}" />
-                        </div>
-                        <div class="form-group">
-                            <label>Customer Type *</label>
-                            <select name="customerType" required>
-                                <option value="residential" ${customer.type === 'residential' ? 'selected' : ''}>Residential</option>
-                                <option value="commercial-a" ${customer.type === 'commercial-a' ? 'selected' : ''}>Commercial A</option>
-                                <option value="commercial-b" ${customer.type === 'commercial-b' ? 'selected' : ''}>Commercial B</option>
-                                <option value="full-commercial" ${customer.type === 'full-commercial' ? 'selected' : ''}>Full Commercial</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Status</label>
-                            <select name="status">
-                                <option value="active" ${customer.status === 'active' ? 'selected' : ''}>Active</option>
-                                <option value="inactive" ${customer.status === 'inactive' ? 'selected' : ''}>Inactive</option>
-                                <option value="pending" ${customer.status === 'pending' ? 'selected' : ''}>Pending</option>
-                            </select>
-                        </div>
-                        <div class="form-group checkbox-form-group">
-                             <label class="alignment-label">&nbsp;</label>
-                             <label class="checkbox-label">
-                                <input type="checkbox" name="discount" value="true" ${customer.discount ? 'checked' : ''} />
-                                <span>PWD / Senior Citizen Discount (${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 20}% off)</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('editCustomerModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Update Customer</button>
-                    </div>
-                </form>
             </div>
         </div>
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Show modal
+    const modal = document.getElementById('editCustomerModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
+    // Stepper Logic
+    let currentStep = 1;
+    const totalSteps = 2;
+    const btnNext = document.getElementById('editCustNext');
+    const btnBack = document.getElementById('editCustBack');
+    const btnSubmit = document.getElementById('editCustSubmit');
+    const fill = document.getElementById('editCustFill');
+
+    function updateStepper() {
+        document.querySelectorAll('#editCustomerModal .modal-step').forEach(s => s.classList.remove('active'));
+        document.getElementById(`editCustStep${currentStep}`).classList.add('active');
+
+        document.querySelectorAll('#editCustomerModal .step-item').forEach((item, idx) => {
+            if (idx + 1 < currentStep) {
+                item.classList.add('completed');
+                item.classList.remove('active');
+            } else if (idx + 1 === currentStep) {
+                item.classList.add('active');
+                item.classList.remove('completed');
+            } else {
+                item.classList.remove('active', 'completed');
+            }
+        });
+
+        fill.style.width = currentStep === 1 ? '0%' : '100%';
+        btnBack.style.display = currentStep === 1 ? 'none' : 'flex';
+        btnNext.style.display = currentStep === totalSteps ? 'none' : 'flex';
+        btnSubmit.style.display = currentStep === totalSteps ? 'flex' : 'none';
+    }
+
+    btnNext.addEventListener('click', () => {
+        currentStep++;
+        updateStepper();
+    });
+
+    btnBack.addEventListener('click', () => {
+        currentStep--;
+        updateStepper();
+    });
 
     document.getElementById('editCustomerForm').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -725,62 +1101,81 @@ function editStaff(staffId, row, cells) {
     };
 
     const modalHTML = `
-        <div class="modal-overlay" id="editStaffModal">
-            <div class="modal">
-                <div class="modal-header">
-                    <h3>Edit Staff - #S${String(staffId).padStart(3, '0')}</h3>
-                    <button class="modal-close" onclick="closeModal('editStaffModal')">
+        <div class="modal-overlay premium-modal-overlay" id="editStaffModal">
+            <div class="premium-modal-card" style="max-width: 440px; width: 95%;">
+                <div class="premium-header-accent"></div>
+                <div class="premium-modal-body" style="padding: 1.25rem 1.75rem;">
+                    <button class="modal-close-btn" onclick="closeModal('editStaffModal')">
                         <i class="fas fa-times"></i>
                     </button>
+
+                    <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
+                        <i class="fas fa-user-shield"></i>
+                    </div>
+                    <h2 class="premium-modal-title" style="font-size: 1.05rem; margin-bottom: 0.1rem;">Edit Staff</h2>
+                    <p class="premium-modal-subtitle" style="margin-bottom: 0.75rem; font-size: 0.8rem;">#S${String(staffId).padStart(3, '0')}</p>
+
+                    <form class="premium-form" id="editStaffForm">
+                        <div class="form-section no-border">
+                            <div class="form-row-elegant">
+                                <div class="form-group-elegant flex-2">
+                                    <label>Last Name *</label>
+                                    <input type="text" name="lastName" value="${staff.lastName}" required />
+                                </div>
+                                <div class="form-group-elegant flex-2">
+                                    <label>First Name *</label>
+                                    <input type="text" name="firstName" value="${staff.firstName}" required />
+                                </div>
+                                <div class="form-group-elegant flex-1">
+                                    <label>M.I.</label>
+                                    <input type="text" name="middleInitial" value="${staff.middleInitial}" maxlength="1" />
+                                </div>
+                            </div>
+                            <div class="form-row-elegant">
+                                <div class="form-group-elegant">
+                                    <label>Role *</label>
+                                    <select name="role" class="elegant-select" required>
+                                        <option value="cashier" ${staff.role === 'cashier' ? 'selected' : ''}>Cashier</option>
+                                        <option value="reader" ${staff.role === 'reader' ? 'selected' : ''}>Meter Reader</option>
+                                    </select>
+                                </div>
+                                <div class="form-group-elegant">
+                                    <label>Status</label>
+                                    <select name="status" class="elegant-select">
+                                        <option value="active" ${staff.status === 'active' ? 'selected' : ''}>Active</option>
+                                        <option value="inactive" ${staff.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+                                        <option value="pending" ${staff.status === 'pending' ? 'selected' : ''}>Pending</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group-elegant">
+                                <label>Contact Number *</label>
+                                <input type="tel" name="contact" value="${staff.contact}" required />
+                            </div>
+                        </div>
+
+                        <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.5rem;">
+                             <button type="button" class="btn-premium-secondary" onclick="closeModal('editStaffModal')" style="padding: 0.5rem 1.25rem;">
+                                Cancel
+                            </button>
+                            <button type="submit" class="btn-premium-primary" id="editStaffSubmit" style="padding: 0.5rem 1.5rem; margin-left: auto;">
+                                <i class="fas fa-check-double"></i> Update Staff
+                            </button>
+                        </div>
+                    </form>
                 </div>
-                <form class="modal-form" id="editStaffForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Last Name *</label>
-                            <input type="text" name="lastName" required value="${staff.lastName}" />
-                        </div>
-                        <div class="form-group">
-                            <label>First Name *</label>
-                            <input type="text" name="firstName" required value="${staff.firstName}" />
-                        </div>
-                        <div class="form-group mi-group">
-                            <label>M.I.</label>
-                            <input type="text" name="middleInitial" value="${staff.middleInitial}" />
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Role *</label>
-                            <select name="role" required>
-                                <option value="cashier" ${staff.role === 'cashier' ? 'selected' : ''}>Cashier</option>
-                                <option value="reader" ${staff.role === 'reader' ? 'selected' : ''}>Meter Reader</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Contact Number *</label>
-                            <input type="tel" name="contact" required value="${staff.contact}" />
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Status</label>
-                            <select name="status">
-                                <option value="active" ${staff.status === 'active' ? 'selected' : ''}>Active</option>
-                                <option value="inactive" ${staff.status === 'inactive' ? 'selected' : ''}>Inactive</option>
-                                <option value="pending" ${staff.status === 'pending' ? 'selected' : ''}>Pending</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('editStaffModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Update Staff</button>
-                    </div>
-                </form>
             </div>
         </div>
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+
+    // Show modal
+    const modal = document.getElementById('editStaffModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
 
     document.getElementById('editStaffForm').addEventListener('submit', async (e) => {
         e.preventDefault();

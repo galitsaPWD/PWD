@@ -155,7 +155,6 @@ serve(async (req) => {
         role: role,
         username: username, // This updates the username if it changed
         contact_number: contact,
-        password: password,
         status: 'active'
       }, { onConflict: 'auth_uid' }) 
 

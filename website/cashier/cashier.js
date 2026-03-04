@@ -645,22 +645,27 @@ async function loadBilling() {
     const period = document.getElementById('billingMonthFilter')?.value || '';
 
     try {
-        // 1. Fetch bills (No server-side filtering on period/status for robustness)
-        const { data: bills, error: billsError } = await supabase
-            .from('billing')
-            .select('*')
-            .order('id', { ascending: false });
+        // 1. Fetch bills and settings
+        const [billsRes, settingsRes] = await Promise.all([
+            supabase.from('billing').select('*').order('id', { ascending: false }),
+            window.cashierDb.loadSystemSettings()
+        ]);
 
-        if (billsError) throw billsError;
+        const bills = billsRes.data;
+        const settings = settingsRes;
+
+        if (billsRes.error) throw billsRes.error;
 
         if (!bills || bills.length === 0) {
             body.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #9E9E9E;">No billing records found.</td></tr>';
             return;
         }
 
-        // Auto-update overdue status
+        // Auto-update overdue status and calculate cutoff threshold
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+
+        const cutoffGrace = settings ? (settings.cutoff_days || settings.cutoff_grace_period || 30) : 30;
 
         for (const bill of bills) {
             if (bill.status === 'unpaid' && new Date(bill.due_date) < today) {
@@ -671,7 +676,17 @@ async function loadBilling() {
 
         // Apply Filters client-side (Robust to schema differences)
         const filteredBills = bills.filter(bill => {
-            if (status && (bill.status || '').toLowerCase() !== status.toLowerCase()) return false;
+            if (status) {
+                if (status.toLowerCase() === 'cutoff') {
+                    if (bill.status !== 'overdue' || !bill.due_date) return false;
+                    const dueDate = new Date(bill.due_date);
+                    dueDate.setHours(0, 0, 0, 0);
+                    const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
+                    if (diffDays < cutoffGrace) return false;
+                } else if ((bill.status || '').toLowerCase() !== status.toLowerCase()) {
+                    return false;
+                }
+            }
             if (period && (bill.billing_period || '').toLowerCase() !== period.toLowerCase()) return false;
 
             // First pass filtering for status and period only.
@@ -729,6 +744,17 @@ async function loadBilling() {
             if (bill.status === 'overdue') statusClass = 'status-danger';
             if (bill.status === 'unpaid') statusClass = 'status-unpaid';
 
+            const isOverdue = bill.status === 'overdue' || bill.status === 'unpaid';
+            let isForCutoff = false;
+            
+            if (isOverdue && bill.due_date) {
+                const dueDate = new Date(bill.due_date);
+                dueDate.setHours(0, 0, 0, 0);
+                const diffTime = today - dueDate;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                isForCutoff = diffDays >= cutoffGrace;
+            }
+
             return `
                 <tr>
                     <td class="mono">#BIL-${String(bill.id).padStart(4, '0')}</td>
@@ -759,7 +785,30 @@ async function loadBilling() {
                             ` : ''}
                         </div>
                     </td>
-                    <td><span class="badge-status ${statusClass}">${(bill.status || '').toUpperCase()}</span></td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="badge-status ${statusClass}">${(bill.status || '').toUpperCase()}</span>
+                            ${isForCutoff ? `
+                                <div class="balance-info-trigger" style="margin-left: 0;">
+                                    <i class="fas fa-exclamation-triangle text-danger" style="cursor: help; animation: pulse 2s infinite;"></i>
+                                    <div class="balance-tooltip" style="width: 200px;">
+                                        <div class="tooltip-header" style="color: #ef4444; border-bottom-color: rgba(239, 68, 68, 0.2);">Disconnection Alert</div>
+                                        <div class="tooltip-row">
+                                            <span>Urgency</span>
+                                            <span style="color: #ef4444; font-weight: 800;">CRITICAL</span>
+                                        </div>
+                                        <div class="tooltip-row" style="font-size: 0.75rem; opacity: 0.8; white-space: normal; margin-top: 4px; line-height: 1.3;">
+                                            Account is eligible for cutoff due to overdue balance exceeding grace period.
+                                        </div>
+                                        <div class="tooltip-footer" style="color: #ef4444; border-top-color: rgba(239, 68, 68, 0.2);">
+                                            <span>STATUS</span>
+                                            <span>FOR CUTOFF</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </td>
                     <td>
                         <div class="actions" style="display: flex; gap: 8px;">
                             ${bill.status !== 'paid' ? `
