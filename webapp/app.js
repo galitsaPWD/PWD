@@ -107,6 +107,7 @@ const toastContainer = document.getElementById('toast-container');
 const pendingSyncCount = document.getElementById('pending-sync');
 const syncBtnAction = document.getElementById('sync-btn-action');
 const totalReadingsDisplay = document.getElementById('total-readings');
+const receiptsDoneDisplay = document.getElementById('receipts-done');
 const barangayTabsContainer = document.getElementById('barangay-tabs');
 
 // === Connection Handling ===
@@ -192,9 +193,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('backToDash').addEventListener('click', () => {
         readingSection.classList.add('hidden');
         dashboardSection.classList.remove('hidden');
+        switchView('home'); // Always return to home when back from reading
+    });
+
+    // Bottom Nav Tab Listeners
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const viewId = tab.dataset.view;
+            switchView(viewId);
+        });
     });
 
     await updateSyncCount();
+
+    // ===== REALTIME SUBSCRIPTION =====
+    if (window.subscribeToTable) {
+        window.subscribeToTable('customers', () => {
+            console.log('🔄 Realtime: Customers changed, reloading dashboard and cutoff...');
+            loadDashboard(); // Refresh counts and progress
+            if (document.querySelector('.nav-tab[data-view="cutoff"].active')) {
+                loadCutoffs();
+            }
+        });
+    }
 });
 
 // === Auth Functions ===
@@ -385,7 +406,7 @@ async function loadDashboard() {
                         due_date
                     )
                 `)
-                .eq('status', 'active');
+                .in('status', ['active', 'inactive']);
 
             // Process and cache ALL customers
             const processedCustomers = (fullCustomers || []).map(c => {
@@ -401,12 +422,14 @@ async function loadDashboard() {
                 };
             });
 
-            // Cache ALL customers for offline use
+            // Cache ALL customers for offline use (active + inactive for cutoff view)
             await saveCache(STORE_CUSTOMERS, processedCustomers);
             localStorage.setItem('sync_customers_time', Date.now());
 
-            // Use lightweight version for dashboard stats
-            allCustomers = processedCustomers.map(c => ({ id: c.id, address: c.address }));
+            // Use ONLY active customers for dashboard counts (matches what openArea loads)
+            allCustomers = processedCustomers
+                .filter(c => (c.status || 'active') === 'active')
+                .map(c => ({ id: c.id, address: c.address }));
 
         } else {
             // === OFFLINE: Fetch from IndexedDB ===
@@ -428,9 +451,11 @@ async function loadDashboard() {
             }
 
 
-            // Load all customers for progress tracking
+            // Load all customers for progress tracking (active-only for consistent counts)
             const cachedCustomers = await getCache(STORE_CUSTOMERS);
-            allCustomers = (cachedCustomers || []).map(c => ({ id: c.id, address: c.address, history: c.history || [] }));
+            allCustomers = (cachedCustomers || [])
+                .filter(c => (c.status || 'active') === 'active')
+                .map(c => ({ id: c.id, address: c.address, history: c.history || [] }));
 
             // Calculate "Today's Bills" from local history + unsynced readings
             const todayStr = new Date().toISOString().split('T')[0];
@@ -473,8 +498,11 @@ async function loadDashboard() {
         const offlineItems = await getOfflineReadings();
         const offlineTotal = offlineItems.reduce((sum, r) => sum + (parseFloat(r.p_consumption) || 0), 0);
 
-        totalReadingsDisplay.textContent = `${(todayConsumption + offlineTotal).toFixed(1)} m³`;
+        totalReadingsDisplay.innerHTML = `${(todayConsumption + offlineTotal).toFixed(1)} <span class="unit">m³</span>`;
         totalReadingsDisplay.nextElementSibling.textContent = 'RECORDED TODAY';
+
+        const receiptsDoneCount = todayBills.length + offlineItems.length;
+        if (receiptsDoneDisplay) receiptsDoneDisplay.textContent = receiptsDoneCount;
 
     } catch (err) {
         showToast('Dashboard Load Error', 'error');
@@ -1108,7 +1136,7 @@ function showReceipt(data) {
     const amountAfterDue = data.total + penaltyAmount;
 
     body.innerHTML = `
-        <div class="receipt-row"><span>Receipt No:</span> <strong>${data.receiptNo}</strong></div>
+        <div class="receipt-row"><span>Reference Code:</span> <strong>${data.receiptNo}</strong></div>
         <div class="receipt-row"><span>Date:</span> <span>${new Date().toLocaleDateString()}</span></div>
         <div style="margin: 15px 0 5px 0; font-weight: 700; border-top: 1px solid #eee; padding-top: 10px; font-size: 16px;">${data.name}</div>
         <div style="font-size: 13px; color: #666; margin-bottom: 15px;">Brgy. ${barangay}</div>
@@ -1159,7 +1187,7 @@ window.shareReceipt = async () => {
 PULUPANDAN WATER DISTRICT
 Digital Meter Receipt
 ---------------------------
-Receipt: ${data.receiptNo}
+Reference: ${data.receiptNo}
 Date: ${new Date().toLocaleDateString()}
 Customer: ${data.name}
 Brgy: ${data.barangay || 'N/A'}
@@ -1209,7 +1237,7 @@ window.directPrint = () => {
 PULUPANDAN WATER DISTRICT
 Digital Meter Receipt
 ---------------------------
-Receipt: ${data.receiptNo}
+Reference: ${data.receiptNo}
 Date: ${new Date().toLocaleDateString()}
 Customer: ${data.name}
 Brgy: ${data.barangay || 'N/A'}
@@ -1411,12 +1439,296 @@ async function updateSyncCount() {
 
 
 // === UI Helpers ===
+// === NAVIGATION SYSTEM ===
+function switchView(viewId) {
+    console.log(`Switching View to: ${viewId}`);
+
+    // Update View Visibility
+    const views = document.querySelectorAll('.app-view');
+    views.forEach(v => {
+        v.classList.toggle('hidden', v.id !== `${viewId}-view`);
+    });
+
+    // Update Bottom Nav Active State
+    const tabs = document.querySelectorAll('.nav-tab');
+    tabs.forEach(t => {
+        t.classList.toggle('active', t.dataset.view === viewId);
+    });
+
+    // Update Header Context (Subtitle)
+    const subtitle = document.getElementById('view-subtitle');
+    if (subtitle) {
+        switch (viewId) {
+            case 'home':
+                subtitle.textContent = 'Ready to start your meter reading route?';
+                break;
+            case 'cutoff':
+                subtitle.textContent = 'Accounts marked for disconnection.';
+                if (typeof loadCutoffs === 'function') loadCutoffs();
+                break;
+            case 'history':
+                subtitle.textContent = 'Your recent reading activity and logs.';
+                if (typeof loadHistory === 'function') loadHistory();
+                break;
+        }
+    }
+}
+
+// Data Loaders for New Views
+async function loadCutoffs() {
+    const list = document.getElementById('cutoff-list');
+    if (!list) return;
+
+    list.innerHTML = '<div class="loading-placeholder">Searching records...</div>';
+
+    try {
+        // Scope to reader's assigned barangays only
+        const assignedBrgys = [];
+        (assignedAreas || []).forEach(area => {
+            (area.barangays || []).forEach(brgy => {
+                if (!assignedBrgys.includes(brgy)) assignedBrgys.push(brgy);
+            });
+        });
+
+        const cachedCustomers = await getCache(STORE_CUSTOMERS);
+        let cutoffAccounts = (cachedCustomers || [])
+            .filter(c => (c.status || '').toLowerCase() === 'inactive');
+
+        // Filter to reader's assigned areas if available
+        if (assignedBrgys.length > 0) {
+            cutoffAccounts = cutoffAccounts.filter(c =>
+                assignedBrgys.some(brgy => (c.address || '').toLowerCase().includes(brgy.toLowerCase()))
+            );
+        }
+
+        cutoffAccounts.sort((a, b) => b.id - a.id);
+
+        // Try to fetch fresher data from server if online
+        if (navigator.onLine) {
+            try {
+                let query = supabase.from('customers')
+                    .select('id, first_name, last_name, address, status, updated_at')
+                    .eq('status', 'inactive');
+                const { data } = await query;
+                if (data && data.length > 0) {
+                    let serverAccounts = data;
+                    if (assignedBrgys.length > 0) {
+                        serverAccounts = serverAccounts.filter(c =>
+                            assignedBrgys.some(brgy => (c.address || '').toLowerCase().includes(brgy.toLowerCase()))
+                        );
+                    }
+                    if (serverAccounts.length > 0) cutoffAccounts = serverAccounts;
+                }
+            } catch (e) { /* use cache fallback */ }
+        }
+
+        if (cutoffAccounts.length === 0) {
+            list.innerHTML = assignedBrgys.length > 0
+                ? '<div class="empty-msg">No cutoff accounts in your assigned areas.</div>'
+                : '<div class="empty-msg">No accounts currently marked for cutoff.</div>';
+            return;
+        }
+
+        // Check locally which ones the reader has already marked done this session
+        // Migration: Check the new timestamp-based storage
+        const doneCutoffsV2 = JSON.parse(localStorage.getItem('done_cutoffs_v2') || '{}');
+
+        list.innerHTML = cutoffAccounts.map(c => {
+            const storedTimestamp = doneCutoffsV2[String(c.id)];
+            const serverTimestamp = c.updated_at;
+            
+            // isDone if we have a stored timestamp AND it's not older than the server's update
+            const isDone = storedTimestamp && serverTimestamp && new Date(storedTimestamp) >= new Date(serverTimestamp);
+
+            return `
+            <div class="modern-card customer-card-cutoff ${isDone ? 'cutoff-done' : ''}" data-id="${c.id}">
+                <div class="card-info">
+                    <h4>${c.first_name} ${c.last_name}</h4>
+                    <p>${c.address || 'No address provided'}</p>
+                    <div class="card-meta">
+                        <span class="badge badge-error">CUTOFF</span>
+                        ${c.arrears ? `<span class="price-pill">ARREARS: ₱${parseFloat(c.arrears || 0).toLocaleString()}</span>` : ''}
+                    </div>
+                </div>
+                ${isDone
+                    ? `<span class="cutoff-done-badge">✓ Done</span>`
+                    : `<button class="btn-cutoff-done" onclick="handleCutoffDone('${c.id}', '${c.first_name} ${c.last_name}', '${c.updated_at}')">Mark Done</button>`
+                }
+            </div>
+        `}).join('');
+    } catch (err) {
+        console.error('Load Cutoffs Error:', err);
+        list.innerHTML = '<div class="empty-msg">Error loading accounts.</div>';
+    }
+}
+
+async function handleCutoffDone(customerId, customerName, updatedAt) {
+    if (!confirm(`Confirm cutoff completed for ${customerName}?`)) return;
+
+    showLoading(true);
+    try {
+        // Record in localStorage V2 with timestamp (for reset logic)
+        const doneV2 = JSON.parse(localStorage.getItem('done_cutoffs_v2') || '{}');
+        doneV2[String(customerId)] = updatedAt || new Date().toISOString();
+        localStorage.setItem('done_cutoffs_v2', JSON.stringify(doneV2));
+
+        // If online, log a notification for the admin
+        if (navigator.onLine) {
+            const readerName = currentUser?.user_metadata?.full_name
+                || currentUser?.email
+                || 'A reader';
+
+            await supabase.from('notifications').insert({
+                type: 'cutoff_done',
+                message: `${readerName} completed cutoff for ${customerName}`,
+                customer_id: parseInt(customerId),
+                is_read: false,
+                created_at: new Date().toISOString()
+            });
+        }
+
+        showToast(`${customerName} marked as done.`, 'success');
+        await loadCutoffs(); // Refresh to show Done badge
+    } catch (err) {
+        console.error('Cutoff Done Error:', err);
+        // Don't block the reader — localStorage already saved the done state
+        showToast(`${customerName} marked as done (offline).`, 'success');
+        await loadCutoffs();
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function loadHistory() {
+    const list = document.getElementById('history-list');
+    if (!list) return;
+
+    list.innerHTML = '<div class="loading-placeholder">Compiling history...</div>';
+
+    try {
+        const todayStr = new Date().toISOString().split('T')[0];
+        
+        // 1. Get Offline Unsynced Readings
+        const offline = await getOfflineReadings() || [];
+        
+        // 2. Get Today's Synced Readings (from server or cache if offline)
+        let todaySynced = [];
+        if (navigator.onLine) {
+            const { data } = await supabase
+                .from('billing')
+                .select('*, customer:customers(first_name, last_name, address)')
+                .eq('reading_date', todayStr)
+                .order('created_at', { ascending: false });
+            todaySynced = data || [];
+        } else {
+            // If offline, check our customer cache for today's readings
+            const cachedCustomers = await getCache(STORE_CUSTOMERS);
+            (cachedCustomers || []).forEach(c => {
+                const todayBill = (c.history || []).find(h => h.reading_date === todayStr);
+                if (todayBill) {
+                    todaySynced.push({
+                        ...todayBill,
+                        customer: {
+                            first_name: c.first_name,
+                            last_name: c.last_name,
+                            address: c.address
+                        }
+                    });
+                }
+            });
+        }
+
+        // 3. Merge and Format
+        const allLogs = [
+            ...offline.map(o => ({
+                ...o,
+                status: 'pending',
+                display_name: o.customer_name || `Customer #${o.customer_id}`,
+                display_date: new Date(o.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            })),
+            ...todaySynced.map(s => ({
+                ...s,
+                status: 'synced',
+                display_name: s.customer ? `${s.customer.first_name} ${s.customer.last_name}` : `Customer #${s.customer_id}`,
+                display_date: new Date(s.created_at || s.reading_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }))
+        ].sort((a, b) => (b.created_at || b.id) - (a.created_at || a.id));
+
+        if (allLogs.length === 0) {
+            list.innerHTML = '<div class="empty-msg">No activity recorded today yet.</div>';
+            return;
+        }
+
+        list.innerHTML = allLogs.map(log => `
+            <div class="history-item ${log.status}">
+                <div class="history-marker"></div>
+                <div class="history-content">
+                    <div class="history-header">
+                        <span class="history-time">${log.display_date}</span>
+                        <span class="history-status-tag">${log.status.toUpperCase()}</span>
+                    </div>
+                    <div class="history-card">
+                        <div class="history-info">
+                            <h4>${log.display_name}</h4>
+                            <p>Reading: ${log.current_reading} m³ | Cons: ${log.consumption} m³</p>
+                        </div>
+                        ${log.status === 'synced' ? 
+                            `<button class="btn-view-log" onclick="viewHistoricalReceipt('${log.id}')">View</button>` : 
+                            `<span class="pending-icon">⏳</span>`
+                        }
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+    } catch (err) {
+        console.error('Load History Error:', err);
+        list.innerHTML = '<div class="empty-msg">Error loading history logs.</div>';
+    }
+}
+
+// Helper to view receipt from history
+async function viewHistoricalReceipt(billId) {
+    showLoading(true);
+    try {
+        let billData;
+        if (navigator.onLine) {
+            const { data } = await supabase
+                .from('billing')
+                .select('*, customer:customers(*)')
+                .eq('id', billId)
+                .single();
+            billData = data;
+        } else {
+            const cachedCustomers = await getCache(STORE_CUSTOMERS);
+            for (const c of cachedCustomers) {
+                const found = (c.history || []).find(h => h.id == billId);
+                if (found) {
+                    billData = { ...found, customer: c };
+                    break;
+                }
+            }
+        }
+
+        if (billData) {
+            showReceipt(billData.customer, billData);
+        } else {
+            showToast('Receipt details not found in cache.', 'error');
+        }
+    } catch (err) {
+        console.error('View Receipt Error:', err);
+        showToast('Error loading receipt', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
 function updateUIState() {
     if (currentUser && profile) {
         authSection.classList.add('hidden');
         dashboardSection.classList.remove('hidden');
-        dashboardSection.classList.remove('hidden');
-        updateConnectionStatus(); // Update status when dashboard becomes visible
+        switchView('home'); // Default to home view on login
+        updateConnectionStatus();
     } else {
         authSection.classList.remove('hidden');
         dashboardSection.classList.add('hidden');

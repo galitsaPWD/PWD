@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wb-reader-v25'; // Improved Synced Button Design
+const CACHE_NAME = 'wb-reader-v28'; // Custom SVG Navigation
 const ASSETS = [
     './',
     './index.html',
