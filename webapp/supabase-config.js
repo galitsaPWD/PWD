@@ -25,23 +25,38 @@ try {
          * @returns {Object} - The subscription channel
          */
         window.subscribeToTable = function (tableName, callback) {
-            // Unsubscribe from existing channel if it exists
+            // Unsubscribe from existing channel if it's already being used for this table
             if (window.realtimeChannels[tableName]) {
-                supabase.removeChannel(window.realtimeChannels[tableName]);
+                const existingChannel = window.realtimeChannels[tableName];
+                console.log(`[Realtime] 🔄 Re-subscribing to ${tableName}. Existing channel state: ${existingChannel.state}`);
+                supabase.removeChannel(existingChannel);
             }
 
+            console.log(`[Realtime] 📡 Connecting to ${tableName}...`);
+
             const channel = supabase
-                .channel(`${tableName}_changes`)
+                .channel(`live-${tableName}-${Math.floor(Math.random() * 10000)}`) // Unique channel name to avoid residue
                 .on('postgres_changes',
                     { event: '*', schema: 'public', table: tableName },
                     (payload) => {
-                        console.log(`[Realtime] ${tableName} changed:`, payload.eventType);
+                        console.log(`[Realtime] ⚡ ${tableName} event:`, payload.eventType, payload);
                         callback(payload);
                     }
                 )
-                .subscribe((status) => {
+                .subscribe((status, error) => {
                     if (status === 'SUBSCRIBED') {
-                        console.log(`[Realtime] Subscribed to ${tableName}`);
+                        console.log(`[Realtime] ✅ Subscribed to ${tableName}`);
+                    } else if (status === 'CLOSED') {
+                        console.warn(`[Realtime] 🚪 Subscription for ${tableName} was closed. This usually happens if a new subscription overwrites this one.`);
+                    } else if (status === 'CHANNEL_ERROR') {
+                        console.error(`[Realtime] ❌ Error in ${tableName} subscription:`, error);
+                        if (error?.message?.includes('JWT')) {
+                            console.error('[Realtime] 🔑 Auth error: JWT might be expired or invalid.');
+                        }
+                    } else if (status === 'TIMED_OUT') {
+                        console.warn(`[Realtime] ⏳ Subscription timed out for ${tableName}. Check internet or Database Publication!`);
+                    } else {
+                        console.log(`[Realtime] Sub status for ${tableName}:`, status);
                     }
                 });
 

@@ -101,6 +101,8 @@ let currentBarangay = 'All';
 const authSection = document.getElementById('auth-section');
 const dashboardSection = document.getElementById('dashboard-section');
 const readingSection = document.getElementById('reading-section');
+const cutoffSection = document.getElementById('cutoff-view');
+const historySection = document.getElementById('history-view');
 const loginForm = document.getElementById('loginForm');
 const loading = document.getElementById('loading');
 const toastContainer = document.getElementById('toast-container');
@@ -205,17 +207,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     await updateSyncCount();
-
-    // ===== REALTIME SUBSCRIPTION =====
-    if (window.subscribeToTable) {
-        window.subscribeToTable('customers', () => {
-            console.log('🔄 Realtime: Customers changed, reloading dashboard and cutoff...');
-            loadDashboard(); // Refresh counts and progress
-            if (document.querySelector('.nav-tab[data-view="cutoff"].active')) {
-                loadCutoffs();
-            }
-        });
-    }
 });
 
 // === Auth Functions ===
@@ -323,6 +314,10 @@ async function fetchProfileAndLoadData() {
         if (profile) {
             document.getElementById('user-name-display').textContent = profile.first_name || 'Reader';
             document.getElementById('user-initials').textContent = (profile.first_name?.[0] || 'R').toUpperCase();
+            
+            // ===== INITIALIZE REALTIME EARLY =====
+            initRealtime(); 
+
             await loadDashboard();
         }
     } catch (err) {
@@ -394,25 +389,28 @@ async function loadDashboard() {
             // 5. ALL CUSTOMERS (FULL DATA) - Pre-load for offline use
             const { data: fullCustomers } = await supabase
                 .from('customers')
-                .select(`
-                    *,
-                    billing:billing(
-                        id,
-                        current_reading,
-                        reading_date,
-                        billing_period,
-                        balance,
-                        consumption,
-                        due_date
-                    )
-                `)
+                .select('*')
                 .in('status', ['active', 'inactive']);
+            
+            // 6. Fetch ALL billing records for these customers (to build history/arrears)
+            const { data: allBills } = await supabase
+                .from('billing')
+                .select('*')
+                .order('reading_date', { ascending: false });
+
+            // Map billing to customers
+            const billsByCustomer = {};
+            (allBills || []).forEach(b => {
+                if (!billsByCustomer[b.customer_id]) billsByCustomer[b.customer_id] = [];
+                billsByCustomer[b.customer_id].push(b);
+            });
 
             // Process and cache ALL customers
             const processedCustomers = (fullCustomers || []).map(c => {
-                const sortedBills = (c.billing || []).sort((a, b) => new Date(b.reading_date) - new Date(a.reading_date));
+                const customerBills = billsByCustomer[c.id] || [];
+                const sortedBills = [...customerBills].sort((a, b) => new Date(b.reading_date) - new Date(a.reading_date));
                 const latestBilling = sortedBills[0];
-                const arrears = (c.billing || []).reduce((sum, b) => sum + (parseFloat(b.balance) || 0), 0);
+                const arrears = customerBills.reduce((sum, b) => sum + (parseFloat(b.balance) || 0), 0);
 
                 return {
                     ...c,
@@ -430,6 +428,16 @@ async function loadDashboard() {
             allCustomers = processedCustomers
                 .filter(c => (c.status || 'active') === 'active')
                 .map(c => ({ id: c.id, address: c.address }));
+
+            // Filter todayBills to ONLY this reader's assigned area customers
+            // Without this, counts are system-wide (all readers combined)
+            const assignedBrgyList = (areas || []).flatMap(area => area.barangays || []);
+            const assignedCustIds = new Set(
+                allCustomers
+                    .filter(c => assignedBrgyList.some(brgy => (c.address || '').toLowerCase().includes(brgy.toLowerCase())))
+                    .map(c => c.id)
+            );
+            todayBills = todayBills.filter(b => assignedCustIds.has(b.customer_id));
 
         } else {
             // === OFFLINE: Fetch from IndexedDB ===
@@ -493,16 +501,19 @@ async function loadDashboard() {
         renderBarangayDashboard(assignedAreas, todayBills, allCustomers);
         updateSyncCount();
 
-        // Calculate Totals (Include offline actions)
+        // Calculate Totals — only for THIS reader's assigned customers
         const todayConsumption = todayBills.reduce((sum, b) => sum + (parseFloat(b.consumption) || 0), 0);
         const offlineItems = await getOfflineReadings();
+        // Offline items already tied to a specific customer_id — no extra filter needed
         const offlineTotal = offlineItems.reduce((sum, r) => sum + (parseFloat(r.p_consumption) || 0), 0);
 
-        totalReadingsDisplay.innerHTML = `${(todayConsumption + offlineTotal).toFixed(1)} <span class="unit">m³</span>`;
+        totalReadingsDisplay.innerHTML = `${(todayConsumption + offlineTotal).toFixed(1)} <span class="unit">cu.m.</span>`;
         totalReadingsDisplay.nextElementSibling.textContent = 'RECORDED TODAY';
 
         const receiptsDoneCount = todayBills.length + offlineItems.length;
         if (receiptsDoneDisplay) receiptsDoneDisplay.textContent = receiptsDoneCount;
+
+        updateCutoffBadge(); // Refresh cutoff badge whenever dashboard reloads
 
     } catch (err) {
         showToast('Dashboard Load Error', 'error');
@@ -747,7 +758,7 @@ function renderCustomerList(customers, offlineReadings = [], todayStr = '') {
                     <div class="detail-row">
                         <div class="previous-reading-badge-small">
                             <span class="label">Prev:</span>
-                            <span class="value">${c.previous_reading} m³</span>
+                            <span class="value">${c.previous_reading} cu.m.</span>
                         </div>
                     </div>
                     
@@ -771,7 +782,7 @@ function renderCustomerList(customers, offlineReadings = [], todayStr = '') {
                         <div class="reading-action-bar">
                             <div class="usage-display-compact" id="cons-card-${c.id}">
                                 <span class="label">Usage</span>
-                                <div class="value" id="cons-${c.id}">0.0 <span class="unit">m³</span></div>
+                                <div class="value" id="cons-${c.id}">0.0 <span class="unit">cu.m.</span></div>
                             </div>
 
                             <button onclick="submitReading(${c.id}, ${c.previous_reading}, ${c.has_discount}, ${c.arrears})" 
@@ -816,7 +827,7 @@ window.updateConsumption = (id, prev) => {
     const current = parseFloat(input.value) || 0;
     const cons = current - prev;
 
-    display.innerHTML = `${Math.max(0, cons).toFixed(2)} <span class="unit">m³</span>`;
+    display.innerHTML = `${Math.max(0, cons).toFixed(2)} <span class="unit">cu.m.</span>`;
 
     // Anomaly Flagging (Spike detection)
     if (cons > 0 && prev > 0) {
@@ -883,8 +894,25 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
     const readingDate = now.toISOString().split('T')[0];
 
     // Calculate Amount
-    let charges = calculateCharges(consumption, hasDiscount);
-    let totalDue = charges.total + arrears;
+    let charges;
+    let totalDue;
+
+    try {
+        charges = calculateCharges(consumption, hasDiscount);
+        totalDue = charges.total + arrears;
+    } catch (calcErr) {
+        showToast('Cannot submit: system rates not loaded yet. Please wait a moment and try again.', 'error');
+        showLoading(false);
+        return;
+    }
+
+    // Safety guard: a zero-amount bill will be immediately marked PAID by the
+    // payment RPC (balance <= 0 → paid). Reject the submission loudly.
+    if (totalDue <= 0 && consumption > 0) {
+        showToast('Calculation error: bill amount is ₱0. Check system settings and retry.', 'error');
+        showLoading(false);
+        return;
+    }
 
     const overdueDays = systemSettings ? (parseInt(systemSettings.cutoff_days || 14)) : 14;
     const dueDate = new Date();
@@ -912,7 +940,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
             await saveOffline(rpcPayload);
             const customerForReceipt = currentAreaCustomers.find(c => c.id === customerId) || {};
             const penaltyPerc = systemSettings ? (parseFloat(systemSettings.penalty_percentage) || 20) : 20;
-            const penalty = totalDue * (penaltyPerc / 100);
+            // NEW PLAN: Penalty only on CURRENT bill amount (Base + Consumption), ignoring Arrears/Discount
+        const penalty = (charges.base + charges.consumption) * (penaltyPerc / 100);
 
             showReceipt({
                 receiptNo: `OFF-${Date.now().toString().slice(-6)}`,
@@ -928,6 +957,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
                 penalty: penalty,
                 penaltyPerc: penaltyPerc,
                 due: dueDateStr,
+                prevDate: (customerForReceipt.history && customerForReceipt.history[0]) ? customerForReceipt.history[0].reading_date : 'N/A',
+                currentDate: readingDate,
                 readerName: profile ? `${profile.first_name} ${profile.last_name}` : 'Reader'
             });
             return;
@@ -941,7 +972,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
                 await saveOffline(rpcPayload);
                 const customerForReceipt = currentAreaCustomers.find(c => c.id === customerId) || {};
                 const penaltyPerc = systemSettings ? (parseFloat(systemSettings.penalty_percentage) || 20) : 20;
-                const penalty = totalDue * (penaltyPerc / 100);
+                // NEW PLAN: Penalty on Gross Current charges
+                const penalty = (charges.base + charges.consumption) * (penaltyPerc / 100);
 
                 showReceipt({
                     receiptNo: `OFF-${Date.now().toString().slice(-6)}`,
@@ -957,6 +989,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
                     penalty: penalty,
                     penaltyPerc: penaltyPerc,
                     due: dueDateStr,
+                    prevDate: (customerForReceipt.history && customerForReceipt.history[0]) ? customerForReceipt.history[0].reading_date : 'N/A',
+                    currentDate: readingDate,
                     readerName: profile ? `${profile.first_name} ${profile.last_name}` : 'Reader'
                 });
                 return;
@@ -964,11 +998,14 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
             throw error;
         }
 
-        const currentCust = currentAreaCustomers.find(c => c.id === customerId);
-        if (currentCust) {
-            if (!currentCust.history) currentCust.history = [];
-            currentCust.history = currentCust.history.filter(h => h.reading_date !== readingDate);
-            currentCust.history.unshift({
+        // Correctly look up the customer from `currentAreaCustomers` to avoid data collision
+        const submittedCust = currentAreaCustomers.find(c => c.id === customerId);
+        if (submittedCust) {
+            if (!submittedCust.history) submittedCust.history = [];
+            submittedCust.history = submittedCust.history.filter(h => h.reading_date !== readingDate);
+            submittedCust.history.unshift({
+                id: data.bill_id,
+                bill_no: data.bill_no,
                 reading_date: readingDate,
                 consumption: consumption,
                 current_reading: value,
@@ -980,13 +1017,14 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
         finalizeInput(customerId);
 
         const penaltyPerc = systemSettings ? (parseFloat(systemSettings.penalty_percentage) || 20) : 20;
-        const penalty = totalDue * (penaltyPerc / 100);
+        // NEW PLAN: Penalty on Gross Current charges
+        const penalty = (charges.base + charges.consumption) * (penaltyPerc / 100);
 
         showReceipt({
-            receiptNo: `RCP-${new Date().getFullYear()}-${data.bill_id}`,
-            name: `${currentCust.first_name} ${currentCust.last_name}`,
-            barangay: extractBarangay(currentCust.address),
-            meter: currentCust.meter_number,
+            receiptNo: `RCP-${new Date().getFullYear()}-${String(data.bill_no || data.bill_id).padStart(4, '0')}`,
+            name: submittedCust ? `${submittedCust.first_name} ${submittedCust.last_name}` : 'Customer',
+            barangay: submittedCust ? extractBarangay(submittedCust.address) : 'N/A',
+            meter: submittedCust ? submittedCust.meter_number : 'N/A',
             prev: prevReading,
             pres: value,
             cons: consumption,
@@ -996,6 +1034,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
             penalty: penalty,
             penaltyPerc: penaltyPerc,
             due: dueDateStr,
+            prevDate: (submittedCust.history && submittedCust.history[1]) ? submittedCust.history[1].reading_date : (submittedCust.history && submittedCust.history[0] ? submittedCust.history[0].reading_date : 'N/A'),
+            currentDate: readingDate,
             readerName: profile ? `${profile.first_name} ${profile.last_name}` : 'Reader'
         });
 
@@ -1021,7 +1061,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
         await saveOffline(rpcPayloadFallback);
         const customerForReceipt = currentAreaCustomers.find(c => c.id === customerId) || {};
         const penaltyPerc = systemSettings ? (parseFloat(systemSettings.penalty_percentage) || 20) : 20;
-        const penalty = totalDue * (penaltyPerc / 100);
+        // NEW PLAN: Penalty on Gross Current charges
+        const penalty = (charges.base + charges.consumption) * (penaltyPerc / 100);
 
         showReceipt({
             receiptNo: `OFF-${Date.now().toString().slice(-6)}`,
@@ -1037,6 +1078,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
             penalty: penalty,
             penaltyPerc: penaltyPerc,
             due: dueDateStr,
+            prevDate: (customerForReceipt.history && customerForReceipt.history[0]) ? customerForReceipt.history[0].reading_date : 'N/A',
+            currentDate: readingDate,
             readerName: profile ? `${profile.first_name} ${profile.last_name}` : 'Reader'
         });
     } finally {
@@ -1084,7 +1127,7 @@ function extractBarangay(address) {
 }
 
 function calculateCharges(consumption, hasDiscount) {
-    if (!systemSettings) return { base: 0, consumption: 0, total: 0 };
+    if (!systemSettings) throw new Error('System settings not loaded — cannot calculate charges.');
     const t1T = systemSettings.tier1_threshold || 10;
     const t1R = systemSettings.tier1_rate || 15;
     const t2T = systemSettings.tier2_threshold || 20;
@@ -1107,20 +1150,19 @@ function calculateCharges(consumption, hasDiscount) {
     }
 
     let total = baseRate + consumptionCharge;
-    let netTotal = total;
-
-    // Billing Logic Sync: Penalties are typically 20%
-    const penaltyPerc = systemSettings ? (parseFloat(systemSettings.penalty_percentage) || 20) : 20;
-
+    let discountAmount = 0;
     if (hasDiscount) {
         const discountP = parseFloat(systemSettings.discount_percentage || 20) / 100;
-        netTotal -= (total * discountP);
+        discountAmount = total * discountP;
     }
+    let netTotal = total - discountAmount;
+    const penaltyPerc = systemSettings ? (parseFloat(systemSettings.penalty_percentage) || 20) : 20;
 
     return {
         base: baseRate,
         consumption: consumptionCharge,
         total: netTotal,
+        discount: discountAmount,
         penaltyPerc: penaltyPerc // Track for receipt display
     };
 }
@@ -1135,20 +1177,46 @@ function showReceipt(data) {
     const penaltyAmount = data.penalty || 0;
     const amountAfterDue = data.total + penaltyAmount;
 
+    const formatMdy = (d) => {
+        if(!d || d === 'N/A') return 'N/A';
+        const date = new Date(d);
+        return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+    };
+
     body.innerHTML = `
         <div class="receipt-row"><span>Reference Code:</span> <strong>${data.receiptNo}</strong></div>
-        <div class="receipt-row"><span>Date:</span> <span>${new Date().toLocaleDateString()}</span></div>
+        <div class="receipt-row"><span>Date:</span> <span>${formatMdy(new Date())}</span></div>
         <div style="margin: 15px 0 5px 0; font-weight: 700; border-top: 1px solid #eee; padding-top: 10px; font-size: 16px;">${data.name}</div>
-        <div style="font-size: 13px; color: #666; margin-bottom: 15px;">Brgy. ${barangay}</div>
+        <div style="font-size: 13px; color: #666; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">Brgy. ${barangay}</div>
         
         <div class="receipt-row"><span>Meter No:</span> <span>${data.meter}</span></div>
-        <div class="receipt-row"><span>Prev Reading:</span> <span>${data.prev}</span></div>
-        <div class="receipt-row"><span>Pres Reading:</span> <span>${data.pres}</span></div>
-        <div class="receipt-row"><span>Consumption:</span> <strong>${data.cons} m³</strong></div>
+        <div class="receipt-row">
+            <div>
+                <span style="display: block;">Prev Reading:</span>
+                <span style="font-size: 11px; color: #888;">(${formatMdy(data.prevDate)})</span>
+            </div>
+            <span>${data.prev}</span>
+        </div>
+        <div class="receipt-row">
+            <div>
+                <span style="display: block;">Pres Reading:</span>
+                <span style="font-size: 11px; color: #888;">(${formatMdy(data.currentDate)})</span>
+            </div>
+            <span>${data.pres}</span>
+        </div>
+        <div class="receipt-row"><span>Consumption:</span> <strong>${data.cons} cu.m.</strong></div>
         
         <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
             <div class="receipt-row"><span>Arrears:</span> <span>₱${(data.arrears || 0).toFixed(2)}</span></div>
             <div class="receipt-row"><span>Current Bill:</span> <span>₱${(data.charges.total || 0).toFixed(2)}</span></div>
+            
+            ${data.charges.discount > 0 ? `
+            <div class="receipt-row" style="color: #059669; font-size: 13px;">
+                <span>Senior Discount:</span> 
+                <span>-₱${data.charges.discount.toFixed(2)}</span>
+            </div>
+            ` : ''}
+
             <div class="receipt-row total" style="border-bottom: 1px dashed #ddd; padding-bottom: 10px; margin-bottom: 10px;">
                 <span>AMOUNT DUE:</span> 
                 <span>₱${data.total.toFixed(2)}</span>
@@ -1165,7 +1233,7 @@ function showReceipt(data) {
         </div>
         
         <div style="margin-top: 15px; background: #F5F5F5; padding: 10px; border-radius: 8px; text-align: center; font-size: 12px;">
-            DUE DATE: <strong>${data.due}</strong>
+            DUE DATE: <strong>${formatMdy(data.due)}</strong>
         </div>
 
         <div style="margin-top: 25px; text-align: center; border-top: 1px solid #eee; padding-top: 15px;">
@@ -1188,22 +1256,24 @@ PULUPANDAN WATER DISTRICT
 Digital Meter Receipt
 ---------------------------
 Reference: ${data.receiptNo}
-Date: ${new Date().toLocaleDateString()}
+Date: ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
 Customer: ${data.name}
 Brgy: ${data.barangay || 'N/A'}
 Meter: ${data.meter}
 ---------------------------
-Prev: ${data.prev}
-Pres: ${data.pres}
-Cons: ${data.cons} m³
+Prev Reading: ${data.prev}
+(${new Date(data.prevDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })})
+Pres Reading: ${data.pres}
+(${new Date(data.currentDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })})
+Cons: ${data.cons} cu.m.
 ---------------------------
 Arrears: P${(data.arrears || 0).toFixed(2)}
 Current: P${(data.charges.total || 0).toFixed(2)}
-TOTAL DUE: P${data.total.toFixed(2)}
+${data.charges.discount > 0 ? `Discount: -P${data.charges.discount.toFixed(2)}\n` : ''}TOTAL DUE: P${data.total.toFixed(2)}
 ---------------------------
 Penalty: P${(data.penalty || 0).toFixed(2)}
 After Due: P${(data.total + (data.penalty || 0)).toFixed(2)}
-DUE DATE: ${data.due}
+DUE DATE: ${new Date(data.due).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
 ---------------------------
 Reader: ${data.readerName}
 Thank you!
@@ -1245,7 +1315,7 @@ Meter: ${data.meter}
 ---------------------------
 Prev: ${data.prev}
 Pres: ${data.pres}
-Cons: ${data.cons} m³
+Cons: ${data.cons} cu.m.
 ---------------------------
 Arrears: P${(data.arrears || 0).toFixed(2)}
 Current: P${(data.charges.total || 0).toFixed(2)}
@@ -1278,7 +1348,8 @@ window.showReceiptShortcut = (id) => {
     if (bill) {
         const charges = calculateCharges(bill.consumption, customer.has_discount);
         const penaltyPerc = systemSettings ? (parseFloat(systemSettings.penalty_percentage) || 20) : 20;
-        const penalty = bill.balance * (penaltyPerc / 100);
+        // NEW PLAN: Penalty only on CURRENT bill amount (Base + Consumption), ignoring Arrears/Discount
+        const penalty = (charges.base + charges.consumption) * (penaltyPerc / 100);
 
         showReceipt({
             receiptNo: `RCP-${new Date().getFullYear()}-${bill.id || 'N/A'}`,
@@ -1294,6 +1365,8 @@ window.showReceiptShortcut = (id) => {
             penalty: penalty,
             penaltyPerc: penaltyPerc,
             due: bill.due_date || 'N/A',
+            prevDate: (customer.history && customer.history[1]) ? customer.history[1].reading_date : (customer.history && customer.history[0] ? customer.history[0].reading_date : 'N/A'),
+            currentDate: bill.reading_date,
             readerName: profile ? `${profile.first_name} ${profile.last_name}` : 'Reader'
         });
     }
@@ -1301,7 +1374,11 @@ window.showReceiptShortcut = (id) => {
 
 async function saveOffline(reading) {
     try {
-        await saveToIndexedDB(reading);
+        const offlineData = {
+            ...reading,
+            timestamp: Date.now()
+        };
+        await saveToIndexedDB(offlineData);
         await updateSyncCount();
         showToast('Offline Log Saved (IndexedDB)', 'info');
         finalizeInput(reading.p_customer_id);
@@ -1350,7 +1427,7 @@ async function syncData() {
         let failCount = 0;
 
         for (const item of readings) {
-            const { id, ...payload } = item;
+            const { id, timestamp, sortTime, ...payload } = item;
 
             // Internal retry logic (3 attempts per reading)
             let attempt = 0;
@@ -1482,7 +1559,9 @@ async function loadCutoffs() {
     list.innerHTML = '<div class="loading-placeholder">Searching records...</div>';
 
     try {
-        // Scope to reader's assigned barangays only
+        const isAdmin = (profile?.role || '').toLowerCase() === 'admin';
+
+        // 1. Identify assigned barangays
         const assignedBrgys = [];
         (assignedAreas || []).forEach(area => {
             (area.barangays || []).forEach(brgy => {
@@ -1490,29 +1569,41 @@ async function loadCutoffs() {
             });
         });
 
+        // 2. Strict enforcement for Readers
+        if (!isAdmin && assignedBrgys.length === 0) {
+            list.innerHTML = `
+                <div class="empty-msg" style="padding: 40px 20px;">
+                    <i class="fas fa-route" style="font-size: 32px; color: var(--text-muted); margin-bottom: 15px; display: block;"></i>
+                    <p style="font-weight: 700; color: var(--text-main);">No Assignments Found</p>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 8px;">Please ask your supervisor to assign a route box to your account for today.</p>
+                </div>`;
+            return;
+        }
+
         const cachedCustomers = await getCache(STORE_CUSTOMERS);
         let cutoffAccounts = (cachedCustomers || [])
             .filter(c => (c.status || '').toLowerCase() === 'inactive');
 
-        // Filter to reader's assigned areas if available
-        if (assignedBrgys.length > 0) {
+        // 3. Apply Barangay Filter (unless Admin)
+        if (!isAdmin) {
             cutoffAccounts = cutoffAccounts.filter(c =>
                 assignedBrgys.some(brgy => (c.address || '').toLowerCase().includes(brgy.toLowerCase()))
             );
         }
 
+        // ... (sorting remains the same)
         cutoffAccounts.sort((a, b) => b.id - a.id);
 
-        // Try to fetch fresher data from server if online
+        // 4. Try to fetch fresher data from server if online
         if (navigator.onLine) {
             try {
-                let query = supabase.from('customers')
+                const { data } = await supabase.from('customers')
                     .select('id, first_name, last_name, address, status, updated_at')
                     .eq('status', 'inactive');
-                const { data } = await query;
+                
                 if (data && data.length > 0) {
                     let serverAccounts = data;
-                    if (assignedBrgys.length > 0) {
+                    if (!isAdmin) {
                         serverAccounts = serverAccounts.filter(c =>
                             assignedBrgys.some(brgy => (c.address || '').toLowerCase().includes(brgy.toLowerCase()))
                         );
@@ -1523,9 +1614,12 @@ async function loadCutoffs() {
         }
 
         if (cutoffAccounts.length === 0) {
-            list.innerHTML = assignedBrgys.length > 0
-                ? '<div class="empty-msg">No cutoff accounts in your assigned areas.</div>'
-                : '<div class="empty-msg">No accounts currently marked for cutoff.</div>';
+            list.innerHTML = `
+                <div class="empty-msg" style="padding: 40px 20px;">
+                    <i class="fas fa-check-circle" style="font-size: 32px; color: #4CAF50; margin-bottom: 15px; display: block;"></i>
+                    <p style="font-weight: 700; color: var(--text-main);">All Clear!</p>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 8px;">No accounts currently marked for cutoff in your assigned barangays.</p>
+                </div>`;
             return;
         }
 
@@ -1574,28 +1668,112 @@ async function handleCutoffDone(customerId, customerName, updatedAt) {
 
         // If online, log a notification for the admin
         if (navigator.onLine) {
-            const readerName = currentUser?.user_metadata?.full_name
+            const readerName = (profile && profile.first_name) 
+                || currentUser?.user_metadata?.full_name
                 || currentUser?.email
                 || 'A reader';
 
             await supabase.from('notifications').insert({
                 type: 'cutoff_done',
                 message: `${readerName} completed cutoff for ${customerName}`,
-                customer_id: parseInt(customerId),
-                is_read: false,
-                created_at: new Date().toISOString()
+                customer_id: customerId
             });
         }
 
-        showToast(`${customerName} marked as done.`, 'success');
-        await loadCutoffs(); // Refresh to show Done badge
+        showLoading(false);
+        showToast(`Cutoff recorded for ${customerName}`);
+        loadCutoffs();
+        updateCutoffBadge(); // Update badge after marking done
     } catch (err) {
-        console.error('Cutoff Done Error:', err);
-        // Don't block the reader — localStorage already saved the done state
-        showToast(`${customerName} marked as done (offline).`, 'success');
-        await loadCutoffs();
+        showLoading(false);
+        console.error('Cutoff Action Error:', err);
+        showToast('Error recording cutoff', 'error');
     } finally {
         showLoading(false);
+    }
+}
+
+async function updateCutoffBadge() {
+    const badge = document.getElementById('cutoff-badge');
+    if (!badge) return;
+
+    try {
+        const isAdmin = (profile?.role || '').toLowerCase() === 'admin';
+        
+        // Use cached data to avoid flickering, realtime will refresh cache/badge
+        const cachedCustomers = await getCache(STORE_CUSTOMERS);
+        if (!cachedCustomers) return;
+
+        const assignedBrgys = [];
+        (assignedAreas || []).forEach(area => {
+            (area.barangays || []).forEach(brgy => {
+                if (!assignedBrgys.includes(brgy)) assignedBrgys.push(brgy);
+            });
+        });
+
+        const cutoffAccounts = cachedCustomers.filter(c => {
+            // Check status
+            if ((c.status || '').toLowerCase() !== 'inactive') return false;
+            
+            // Check assigned area (if reader)
+            if (!isAdmin) {
+                const isAssigned = assignedBrgys.some(brgy => 
+                    (c.address || '').toLowerCase().includes(brgy.toLowerCase())
+                );
+                if (!isAssigned) return false;
+            }
+
+            // Check if already done in this session
+            const doneCutoffsV2 = JSON.parse(localStorage.getItem('done_cutoffs_v2') || '{}');
+            const storedTimestamp = doneCutoffsV2[String(c.id)];
+            const serverTimestamp = c.updated_at;
+            const isDone = storedTimestamp && serverTimestamp && new Date(storedTimestamp) >= new Date(serverTimestamp);
+            
+            return !isDone;
+        });
+
+        const pendingCount = cutoffAccounts.length;
+        if (pendingCount > 0) {
+            badge.textContent = pendingCount;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    } catch (err) {
+        console.error('Update Cutoff Badge Error:', err);
+    }
+}
+
+// Global initialization for realtime in webapp
+function initRealtime() {
+    if (typeof subscribeToTable === 'function') {
+        if (!navigator.onLine) return; // Don't bother subscribing if offline
+
+        console.log('[Realtime] Initializing WebApp listeners...');
+        
+        // Listen for customer changes (new cutoffs)
+        subscribeToTable('customers', (payload) => {
+            console.log('[Realtime] Customer event received:', payload.eventType);
+            // Reload dashboard data to get fresh counts/status
+            loadDashboard(); 
+
+            // If user is currently looking at cutoffs, refresh that view too
+            if (cutoffSection && !cutoffSection.classList.contains('hidden')) {
+                loadCutoffs();
+            }
+        });
+
+        // Listen for new bills (might trigger arrears/cutoff status)
+        subscribeToTable('billing', (payload) => {
+            console.log('[Realtime] Billing event received:', payload.eventType);
+            loadDashboard();
+
+            if (cutoffSection && !cutoffSection.classList.contains('hidden')) {
+                loadCutoffs();
+            }
+        });
+    } else {
+        console.warn('[Realtime] subscribeToTable not found during initRealtime');
     }
 }
 
@@ -1614,12 +1792,27 @@ async function loadHistory() {
         // 2. Get Today's Synced Readings (from server or cache if offline)
         let todaySynced = [];
         if (navigator.onLine) {
-            const { data } = await supabase
+            const { data: bills, error: billsError } = await supabase
                 .from('billing')
-                .select('*, customer:customers(first_name, last_name, address)')
+                .select('*')
                 .eq('reading_date', todayStr)
-                .order('created_at', { ascending: false });
-            todaySynced = data || [];
+                .order('id', { ascending: false });
+            
+            if (!billsError && bills && bills.length > 0) {
+                const customerIds = [...new Set(bills.map(b => b.customer_id))];
+                const { data: customers } = await supabase
+                    .from('customers')
+                    .select('id, first_name, last_name, address')
+                    .in('id', customerIds);
+                
+                const customerMap = {};
+                (customers || []).forEach(c => { customerMap[c.id] = c; });
+
+                todaySynced = bills.map(b => ({
+                    ...b,
+                    customer: customerMap[b.customer_id]
+                }));
+            }
         } else {
             // If offline, check our customer cache for today's readings
             const cachedCustomers = await getCache(STORE_CUSTOMERS);
@@ -1643,16 +1836,37 @@ async function loadHistory() {
             ...offline.map(o => ({
                 ...o,
                 status: 'pending',
-                display_name: o.customer_name || `Customer #${o.customer_id}`,
-                display_date: new Date(o.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                sortTime: o.timestamp || Date.now(),
+                display_name: o.p_customer_name || `Customer #${o.p_customer_id}`,
+                display_date: new Date(o.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             })),
-            ...todaySynced.map(s => ({
-                ...s,
-                status: 'synced',
-                display_name: s.customer ? `${s.customer.first_name} ${s.customer.last_name}` : `Customer #${s.customer_id}`,
-                display_date: new Date(s.created_at || s.reading_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            }))
-        ].sort((a, b) => (b.created_at || b.id) - (a.created_at || a.id));
+            ...todaySynced.map(s => {
+                let timeStr = 'N/A';
+                let sortTime = Date.now();
+                
+                if (s.updated_at) {
+                    let dStr = s.updated_at;
+                    if (typeof dStr === 'string' && !dStr.includes('Z') && !dStr.includes('+')) {
+                        // Ensure it's treated as UTC if no timezone is present
+                        dStr = dStr.replace(' ', 'T') + 'Z';
+                    }
+                    const d = new Date(dStr);
+                    timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    sortTime = d.getTime();
+                } else if (s.reading_date) {
+                    timeStr = `--:--`;
+                    sortTime = new Date(s.reading_date).getTime();
+                }
+
+                return {
+                    ...s,
+                    status: 'synced',
+                    sortTime: sortTime,
+                    display_name: s.customer ? `${s.customer.first_name} ${s.customer.last_name}` : `Customer #${s.customer_id}`,
+                    display_date: timeStr
+                };
+            })
+        ].sort((a, b) => b.sortTime - a.sortTime);
 
         if (allLogs.length === 0) {
             list.innerHTML = '<div class="empty-msg">No activity recorded today yet.</div>';
@@ -1665,17 +1879,16 @@ async function loadHistory() {
                 <div class="history-content">
                     <div class="history-header">
                         <span class="history-time">${log.display_date}</span>
-                        <span class="history-status-tag">${log.status.toUpperCase()}</span>
                     </div>
-                    <div class="history-card">
+                    <div class="history-card" onclick="viewHistoricalReceipt(${log.id})">
                         <div class="history-info">
-                            <h4>${log.display_name}</h4>
-                            <p>Reading: ${log.current_reading} m³ | Cons: ${log.consumption} m³</p>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <h4>${log.display_name}</h4>
+                                <span class="history-status-tag">${log.status.toUpperCase()}</span>
+                            </div>
+                            <p>${log.consumption || log.p_consumption || 0} cu.m. consumed • ₱${(log.amount || log.p_amount || 0).toFixed(2)}</p>
                         </div>
-                        ${log.status === 'synced' ? 
-                            `<button class="btn-view-log" onclick="viewHistoricalReceipt('${log.id}')">View</button>` : 
-                            `<span class="pending-icon">⏳</span>`
-                        }
+                        <div class="btn-view-log">View</div>
                     </div>
                 </div>
             </div>
@@ -1693,12 +1906,21 @@ async function viewHistoricalReceipt(billId) {
     try {
         let billData;
         if (navigator.onLine) {
-            const { data } = await supabase
+            const { data: bill, error: billError } = await supabase
                 .from('billing')
-                .select('*, customer:customers(*)')
+                .select('*')
                 .eq('id', billId)
                 .single();
-            billData = data;
+            
+            if (!billError && bill) {
+                const { data: customer } = await supabase
+                    .from('customers')
+                    .select('*')
+                    .eq('id', bill.customer_id)
+                    .single();
+                
+                billData = { ...bill, customer };
+            }
         } else {
             const cachedCustomers = await getCache(STORE_CUSTOMERS);
             for (const c of cachedCustomers) {
@@ -1711,7 +1933,35 @@ async function viewHistoricalReceipt(billId) {
         }
 
         if (billData) {
-            showReceipt(billData.customer, billData);
+            // Find prev date from customer history
+            const history = (billData.customer.history || []);
+            const currentIdx = history.findIndex(h => h.id == billData.id || h.reading_date === billData.reading_date);
+            const prevBill = currentIdx !== -1 ? history[currentIdx + 1] : null;
+
+            const receiptData = {
+                receiptNo: `RCP-${new Date(billData.reading_date).getFullYear()}-${billData.id || 'N/A'}`,
+                name: `${billData.customer.first_name} ${billData.customer.last_name}`,
+                barangay: billData.customer.address ? extractBarangay(billData.customer.address) : 'N/A',
+                meter: billData.customer.meter_number,
+                prev: billData.previous_reading || 0,
+                pres: billData.current_reading || 0,
+                cons: billData.consumption || 0,
+                charges: {
+                    base: billData.base_charge || 0,
+                    consumption: billData.consumption_charge || 0,
+                    total: (billData.base_charge || 0) + (billData.consumption_charge || 0),
+                    discount: billData.discount_amount || 0
+                },
+                arrears: billData.arrears || 0,
+                total: billData.amount || 0,
+                penalty: billData.penalty || 0,
+                penaltyPerc: systemSettings ? (parseFloat(systemSettings.penalty_percentage) || 20) : 20,
+                due: billData.due_date,
+                prevDate: prevBill ? prevBill.reading_date : 'N/A',
+                currentDate: billData.reading_date,
+                readerName: profile ? `${profile.first_name} ${profile.last_name}` : 'Reader'
+            };
+            showReceipt(receiptData);
         } else {
             showToast('Receipt details not found in cache.', 'error');
         }
