@@ -55,6 +55,11 @@
             console.log('Admin session verified:', session.user.email);
             window.authUser = session.user;
             window.userProfile = profile;
+
+            // Dispatch event to signal that auth is ready
+            document.dispatchEvent(new CustomEvent('auth-ready', { 
+                detail: { user: session.user, profile: profile } 
+            }));
         } catch (err) {
             console.error('Auth verification failed:', err);
             window.location.replace('../index.html');

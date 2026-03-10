@@ -180,6 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const billSearch = document.getElementById('billingSearch');
     const billStatusFilter = document.getElementById('billingStatusFilter');
     const billMonthFilter = document.getElementById('billingMonthFilter');
+    const billBarangayFilter = document.getElementById('billingBarangayFilter');
 
     if (billSearch) {
         billSearch.addEventListener('input', debounce(() => loadBilling(), 300));
@@ -190,11 +191,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (billMonthFilter) {
         billMonthFilter.addEventListener('change', () => loadBilling());
     }
+    if (billBarangayFilter) {
+        billBarangayFilter.addEventListener('change', () => loadBilling());
+    }
 
     // Records Filters
     const logSearch = document.getElementById('logSearch');
     const logDateFrom = document.getElementById('logDateFrom');
     const logDateTo = document.getElementById('logDateTo');
+    const logBarangayFilter = document.getElementById('logBarangayFilter');
 
     if (logSearch) {
         logSearch.addEventListener('input', () => loadCollectionRecords());
@@ -204,6 +209,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (logDateTo) {
         logDateTo.addEventListener('change', () => loadCollectionRecords());
+    }
+    if (logBarangayFilter) {
+        logBarangayFilter.addEventListener('change', () => loadCollectionRecords());
     }
 
     // Barangay Filters
@@ -219,6 +227,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (custBarangayFilter) {
         custBarangayFilter.innerHTML = '<option value="">All Barangays</option>' + barangayOptions;
         custBarangayFilter.addEventListener('change', () => refreshCustomers());
+    }
+    if (billBarangayFilter && billBarangayFilter.options.length <= 1) {
+        billBarangayFilter.innerHTML = '<option value="">All Barangays</option>' + barangayOptions;
+    }
+    if (logBarangayFilter && logBarangayFilter.options.length <= 1) {
+        logBarangayFilter.innerHTML = '<option value="">All Barangays</option>' + barangayOptions;
     }
 });
 
@@ -337,7 +351,7 @@ function updateCashierChart(stats) {
 
                 // Draw the count
                 ctx.font = 'bold 36px Inter';
-                ctx.fillStyle = document.body.classList.contains('dark-theme') ? '#F9FAFB' : '#1E293B';
+                ctx.fillStyle = document.documentElement.classList.contains('dark-theme') ? '#F9FAFB' : '#1E293B';
                 ctx.fillText(chart.config.options.plugins.centerText.text, width / 2, height / 2 + 18 + top);
 
                 ctx.restore();
@@ -611,7 +625,7 @@ async function loadRecentCollections() {
         const customerIds = [...new Set(bills.map(b => b.customer_id))];
         const { data: customers, error: customerError } = await supabase
             .from('customers')
-            .select('id, first_name, last_name')
+            .select('id, first_name, last_name, status')
             .in('id', customerIds);
 
         if (customerError) throw customerError;
@@ -624,12 +638,14 @@ async function loadRecentCollections() {
 
         body.innerHTML = bills.map(bill => {
             const customer = customerMap[bill.customer_id] || { first_name: 'Unknown', last_name: 'Customer' };
+            const isInactive = (customer.status || '').toLowerCase() === 'inactive';
             return `
-                <td>${customer.last_name}, ${customer.first_name}</td>
-                <td class="text-success">₱${parseFloat(bill.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                <td class="mono">#BIL-${String(bill.id).padStart(4, '0')}</td>
-                <td>${formatLocalDateTime(bill.updated_at, false)}</td>
-            </tr>
+                <tr class="${isInactive ? 'status-inactive' : ''}">
+                    <td>${customer.last_name}, ${customer.first_name}${isInactive ? ' <span class="badge-deactivated">DEACTIVATED</span>' : ''}</td>
+                    <td class="text-success">₱${parseFloat(bill.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td class="mono">#BIL-${String(bill.id).padStart(4, '0')}</td>
+                    <td>${formatLocalDateTime(bill.updated_at, false)}</td>
+                </tr>
             `;
         }).join('');
     } catch (error) {
@@ -643,6 +659,7 @@ async function loadBilling() {
     const search = document.getElementById('billingSearch')?.value || '';
     const status = document.getElementById('billingStatusFilter')?.value || '';
     const period = document.getElementById('billingMonthFilter')?.value || '';
+    const barangay = document.getElementById('billingBarangayFilter')?.value || '';
 
     try {
         // 1. Fetch bills and settings
@@ -699,11 +716,11 @@ async function loadBilling() {
             return;
         }
 
-        // 2. Fetch related customers
+        // 2. Fetch related customers (including address for barangay filtering)
         const searchCustomerIds = [...new Set(filteredBills.map(b => b.customer_id))];
         const { data: searchCustomers, error: searchCustomerError } = await supabase
             .from('customers')
-            .select('id, first_name, last_name, meter_number')
+            .select('id, first_name, last_name, meter_number, address, status')
             .in('id', searchCustomerIds);
 
         if (searchCustomerError) throw searchCustomerError;
@@ -719,6 +736,10 @@ async function loadBilling() {
             const fullName = `${customer.first_name || ''} ${customer.last_name || ''}`.toLowerCase();
             const meterNo = (customer.meter_number || '').toLowerCase();
             const accountId = customer.id ? getAccountID(customer.id).toLowerCase() : '';
+            const address = (customer.address || '').toLowerCase();
+
+            // Barangay filter
+            if (barangay && !address.includes(barangay.toLowerCase())) return false;
 
             if (!search) return true;
             const term = search.toLowerCase();
@@ -739,6 +760,7 @@ async function loadBilling() {
 
         body.innerHTML = finalResults.map(bill => {
             const customer = searchCustomerMap[bill.customer_id] || { first_name: 'Unknown', last_name: 'Customer' };
+            const isInactive = (customer.status || '').toLowerCase() === 'inactive'; // New logic
             let statusClass = 'status-warning';
             if (bill.status === 'paid') statusClass = 'status-paid';
             if (bill.status === 'overdue') statusClass = 'status-danger';
@@ -756,9 +778,19 @@ async function loadBilling() {
             }
 
             return `
-                <tr>
+                <tr class="${isInactive ? 'status-inactive' : ''}">
                     <td class="mono">#BIL-${String(bill.id).padStart(4, '0')}</td>
-                    <td>${customer.last_name}, ${customer.first_name}</td>
+                    <td>
+                        <div class="customer-column">
+                            <span class="customer-name">${customer.last_name}, ${customer.first_name}</span>
+                            ${isInactive ? '<span class="badge-deactivated">DEACTIVATED</span>' : ''}
+                            <div class="customer-meta">
+                                <span class="customer-acc-id mono" style="color: var(--text-light); font-size: 0.75rem;">${getAccountID(customer.id)}</span>
+                                <span class="meta-sep" style="opacity: 0.3; margin: 0 2px;">•</span>
+                                <span class="barangay-mini" style="color: var(--text-light); font-size: 0.75rem;">${getBarangay(customer.address)}</span>
+                            </div>
+                        </div>
+                    </td>
                     <td>${formatLocalDateTime(bill.reading_date, false)}</td>
                     <td class="text-primary">
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -790,19 +822,12 @@ async function loadBilling() {
                             <span class="badge-status ${statusClass}">${(bill.status || '').toUpperCase()}</span>
                             ${isForCutoff ? `
                                 <div class="balance-info-trigger" style="margin-left: 0;">
-                                    <i class="fas fa-exclamation-triangle text-danger" style="cursor: help; animation: pulse 2s infinite;"></i>
-                                    <div class="balance-tooltip" style="width: 200px;">
+                                    <i class="fas fa-exclamation-triangle text-danger" style="cursor: pointer; animation: pulse 2s infinite;"></i>
+                                    <div class="balance-tooltip" style="width: 180px;">
                                         <div class="tooltip-header" style="color: #ef4444; border-bottom-color: rgba(239, 68, 68, 0.2);">Disconnection Alert</div>
-                                        <div class="tooltip-row">
-                                            <span>Urgency</span>
-                                            <span style="color: #ef4444; font-weight: 800;">CRITICAL</span>
-                                        </div>
-                                        <div class="tooltip-row" style="font-size: 0.75rem; opacity: 0.8; white-space: normal; margin-top: 4px; line-height: 1.3;">
-                                            Account is eligible for cutoff due to overdue balance exceeding grace period.
-                                        </div>
-                                        <div class="tooltip-footer" style="color: #ef4444; border-top-color: rgba(239, 68, 68, 0.2);">
-                                            <span>STATUS</span>
-                                            <span>FOR CUTOFF</span>
+                                        <div class="tooltip-row" style="margin-bottom: 0;">
+                                            <span>Status</span>
+                                            <span style="color: #ef4444; font-weight: 800;">FOR CUTOFF</span>
                                         </div>
                                     </div>
                                 </div>
@@ -941,7 +966,7 @@ function initializeTheme() {
     const savedTheme = localStorage.getItem('admin-theme') || 'light';
 
     if (savedTheme === 'dark') {
-        document.body.classList.add('dark-theme');
+        document.documentElement.classList.add('dark-theme');
         if (themeToggle) {
             themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
             themeToggle.style.color = '#FFD700'; // Gold Sun
@@ -950,7 +975,7 @@ function initializeTheme() {
 
     if (themeToggle) {
         themeToggle.addEventListener('click', () => {
-            const isDark = document.body.classList.toggle('dark-theme');
+            const isDark = document.documentElement.classList.toggle('dark-theme');
             localStorage.setItem('admin-theme', isDark ? 'dark' : 'light');
             themeToggle.innerHTML = isDark ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
             if (isDark) {
@@ -1087,7 +1112,7 @@ async function loadBillingMonths() {
 
         const currentVal = filter.value;
         filter.innerHTML = '<option value="">All Periods</option>' +
-            sortedKeys.map(display => `<option value="${normalizedMap[display]}" ${normalizedMap[display] === currentVal ? 'selected' : ''}>${display}</option>`).join('');
+            sortedKeys.map(display => `<option value="${display}" ${display === currentVal ? 'selected' : ''}>${display}</option>`).join('');
     } catch (error) {
         console.error('Error loading periods:', error);
     }
@@ -1099,6 +1124,7 @@ async function loadCollectionRecords() {
     const search = document.getElementById('logSearch')?.value || '';
     const dateFrom = document.getElementById('logDateFrom')?.value || '';
     const dateTo = document.getElementById('logDateTo')?.value || '';
+    const barangay = document.getElementById('logBarangayFilter')?.value || '';
 
     if (!body) return;
 
@@ -1142,7 +1168,7 @@ async function loadCollectionRecords() {
         const customerIds = [...new Set(unified.map(u => u.customer_id))];
         const { data: customers } = await supabase
             .from('customers')
-            .select('id, first_name, last_name')
+            .select('id, first_name, last_name, address, status')
             .in('id', customerIds);
 
         const customerMap = {};
@@ -1154,9 +1180,14 @@ async function loadCollectionRecords() {
             return {
                 ...u,
                 customerName: customer ? `${customer.last_name}, ${customer.first_name}` : 'Unknown Customer',
-                accountID: getAccountID(u.customer_id)
+                accountID: getAccountID(u.customer_id),
+                address: customer?.address || '',
+                isInactive: (customer?.status || '').toLowerCase() === 'inactive'
             };
         }).filter(u => {
+            // Barangay filter
+            if (barangay && !u.address.toLowerCase().includes(barangay.toLowerCase())) return false;
+
             if (!search) return true;
             const term = search.toLowerCase();
             return u.customerName.toLowerCase().includes(term) ||
@@ -1224,10 +1255,10 @@ function renderLogRecords() {
         const time = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' });
 
         html += `
-            <tr>
+            <tr class="${u.isInactive ? 'status-inactive' : ''}">
                 <td><span class="time-badge">${time}</span></td>
                 <td class="account-id">${u.accountID}</td>
-                <td>${u.customerName}</td>
+                <td>${u.customerName}${u.isInactive ? ' <span class="badge-deactivated">DEACTIVATED</span>' : ''}</td>
                 <td class="text-success font-weight-bold">₱${parseFloat(u.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                 <td><span class="badge ${u.method === 'Cash' ? 'secondary' : 'primary'}">${u.method}</span></td>
                 <td><code style="font-size: 0.85rem;">${u.ref}</code></td>
@@ -1302,18 +1333,23 @@ window.setQuickDate = setQuickDate;
 // === MASTER LEDGER ===
 function initializeLedgerPage() {
     const barangayFilter = document.getElementById('ledgerBarangayFilter');
+    const periodFilter = document.getElementById('ledgerPeriodFilter');
     const searchInput = document.getElementById('ledgerSearch');
     const backBtn = document.getElementById('backToMasterBtn');
 
     // Populate Barangays if not already
     populateBarangayFilters('ledgerBarangayFilter');
 
+    // Populate Period filter
+    populateLedgerPeriodFilter();
+
     // Event Listeners
     const updateLedger = () => {
         if (window.dbOperations && window.dbOperations.loadMasterLedger) {
             window.dbOperations.loadMasterLedger({
-                barangay: barangayFilter.value,
-                search: searchInput.value
+                barangay: barangayFilter?.value || '',
+                search: searchInput?.value || '',
+                period: periodFilter?.value || ''
             });
         }
     };
@@ -1322,6 +1358,7 @@ function initializeLedgerPage() {
     window.updateCashierLedger = updateLedger;
 
     barangayFilter?.addEventListener('change', updateLedger);
+    periodFilter?.addEventListener('change', updateLedger);
     searchInput?.addEventListener('input', debounce(updateLedger, 300));
 
     // Print Logic
@@ -1397,3 +1434,40 @@ function populateBarangayFilters(selectId) {
     });
 }
 
+/**
+ * Populate the ledger period filter from billing data
+ */
+async function populateLedgerPeriodFilter() {
+    const select = document.getElementById('ledgerPeriodFilter');
+    if (!select || select.options.length > 1) return;
+
+    try {
+        const { data, error } = await supabase
+            .from('billing')
+            .select('billing_period');
+
+        if (error) throw error;
+
+        // Normalize and deduplicate: '02/25/2026', 'February 2026' → 'February 2026'
+        const normalizedMap = {};
+        data.forEach(b => {
+            const raw = b.billing_period;
+            if (!raw) return;
+            const key = typeof normalizePeriod === 'function' ? normalizePeriod(raw) : raw;
+            if (key && !normalizedMap[key]) {
+                normalizedMap[key] = raw;
+            }
+        });
+
+        const sortedKeys = Object.keys(normalizedMap).sort((a, b) => new Date(b) - new Date(a));
+
+        sortedKeys.forEach(display => {
+            const opt = document.createElement('option');
+            opt.value = normalizedMap[display];
+            opt.textContent = display;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Could not populate ledger period filter:', e);
+    }
+}

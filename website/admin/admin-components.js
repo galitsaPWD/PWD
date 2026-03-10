@@ -26,14 +26,14 @@ function closeModal(modalId) {
 
 function openModal(id) {
     console.log('Opening modal:', id);
-    if (id === 'customerModal') showCustomerModal();
-    if (id === 'staffModal') showStaffModal();
-    if (id === 'changePasswordModal') {
-        const modal = document.getElementById('changePasswordModal');
-        if (modal) {
-            modal.style.display = 'flex';
-            setTimeout(() => modal.classList.add('active'), 10);
-        }
+    if (id === 'customerModal') return showCustomerModal();
+    if (id === 'staffModal') return showStaffModal();
+    
+    // Generic fallback for fixed modals (like cutoffConfirmModal)
+    const modal = document.getElementById(id);
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
     }
 }
 
@@ -122,38 +122,53 @@ function showCustomerModal() {
                                     <div class="form-group-elegant">
                                         <label>Customer Type *</label>
                                         <select name="customerType" class="elegant-select" required>
-                                            <option value="residential">Residential</option>
-                                            <option value="commercial-a">Commercial A</option>
-                                            <option value="commercial-b">Commercial B</option>
-                                            <option value="full-commercial">Full Commercial</option>
+                                            <option value="residential">Residential / Government</option>
+                                            <option value="commercial-a">Semi-Commercial A</option>
+                                            <option value="commercial-b">Semi-Commercial B</option>
+                                            <option value="commercial-c">Semi-Commercial C</option>
+                                            <option value="full-commercial">Commercial / Industrial</option>
+                                            <option value="bulk">Bulk / Wholesale</option>
                                         </select>
                                     </div>
                                 </div>
                                 <div class="form-row-elegant">
                                     <div class="form-group-elegant">
+                                        <label>Meter Size *</label>
+                                        <select name="meterSize" class="elegant-select" required>
+                                            <option value='1/2"'>1/2"</option>
+                                            <option value='3/4"'>3/4"</option>
+                                            <option value='1"'>1"</option>
+                                            <option value='1 1/2"'>1 1/2"</option>
+                                            <option value='2"'>2"</option>
+                                            <option value='3"'>3"</option>
+                                            <option value='4"'>4"</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group-elegant">
                                         <label>Meter Number *</label>
                                         <input type="text" name="meterNumber" placeholder="Serial No." required />
                                     </div>
+                                </div>
+                                <div class="form-row-elegant">
                                     <div class="form-group-elegant">
                                         <label>Initial Status</label>
                                         <select name="status" class="elegant-select">
                                             <option value="active">Active</option>
                                             <option value="inactive">Inactive</option>
-                                            <option value="pending">Pending</option>
                                         </select>
                                     </div>
-                                </div>
                                 <div class="form-group-elegant checkbox-form-group" style="margin-top: 0.5rem;">
                                      <label class="checkbox-label premium-cb" style="padding: 0.5rem; border-radius: 10px;">
                                         <input type="checkbox" name="discount" value="true" />
                                         <div class="cb-text">
-                                            <span class="cb-title" style="font-size: 0.85rem;">Senior / PWD Discount</span>
+                                            <span class="cb-title" style="font-size: 0.85rem;">Senior Citizen Discount</span>
                                             <span class="cb-sub" style="font-size: 0.7rem;">Apply ${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 20}% off</span>
                                         </div>
                                     </label>
                                 </div>
                             </div>
-                        </div>
+                        </div> <!-- close form-section -->
+                        </div> <!-- close custStep2 -->
 
                         <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.75rem;">
                             <button type="button" class="btn-premium-secondary" id="custBtnBack" style="display: none; padding: 0.5rem 1rem;">
@@ -366,7 +381,6 @@ function showStaffModal() {
                                     <select name="status" class="elegant-select" style="padding: 0.6rem 0.875rem; font-size: 0.9rem;">
                                         <option value="active">Active</option>
                                         <option value="inactive">Inactive</option>
-                                        <option value="pending">Pending</option>
                                     </select>
                                 </div>
                             </div>
@@ -835,10 +849,15 @@ async function showBillModal(billId) {
         const middleInitial = customer.middle_initial ? ` ${customer.middle_initial}.` : '';
         const customerName = `${customer.last_name}, ${customer.first_name}${middleInitial}`;
 
-        // Settings for logic
-        const settings = await window.dbOperations.loadSystemSettings();
+        // Settings and Schedules for logic
+        const [settings, schedules] = await Promise.all([
+            window.dbOperations.loadSystemSettings(),
+            window.dbOperations.loadRateSchedules()
+        ]);
 
-        const data = window.BillingEngine.calculate(bill, customer, settings);
+        const schedule = schedules.find(s => s.category_key === customer.customer_type);
+
+        const data = window.BillingEngine.calculate(bill, customer, settings, schedule);
         const invoiceHTML = window.BillingEngine.generateInvoiceHTML(bill, customer, data, { customerName });
 
         const modalHTML = `
@@ -896,13 +915,14 @@ function editCustomer(customerId, row, cells) {
         contact: row.dataset.contact || '',
         status: (row.dataset.status || 'active').toLowerCase(),
         discount: row.dataset.discount === 'true',
-        type: row.dataset.type || 'residential'
+        type: row.dataset.type || 'residential',
+        meterSize: row.dataset.meterSize || '1/2"'
     };
 
     const modalHTML = `
         <div class="modal-overlay premium-modal-overlay" id="editCustomerModal">
             <div class="premium-modal-card" style="max-width: 480px; width: 95%;">
-                <div class="premium-header-accent"></div>
+                <div class="premium-header-accent" style="height: 4px; background: linear-gradient(90deg, #0f172a, #1e293b);"></div>
                 <div class="premium-modal-body" style="padding: 1.25rem 1.75rem;">
                     <button class="modal-close-btn" onclick="closeModal('editCustomerModal')">
                         <i class="fas fa-times"></i>
@@ -952,6 +972,14 @@ function editCustomer(customerId, row, cells) {
                                     <input type="tel" name="contact" value="${customer.contact}" required />
                                 </div>
                             </div>
+                            <div class="stepper-actions" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: flex-end;">
+                                <button type="button" class="btn-premium-secondary" onclick="closeModal('editCustomerModal')" style="padding: 0.5rem 1rem; margin-right: 0.5rem;">
+                                    Cancel
+                                </button>
+                                <button type="button" class="btn-premium-primary" id="editCustNext" style="padding: 0.5rem 1.5rem;">
+                                    Next <i class="fas fa-arrow-right"></i>
+                                </button>
+                            </div>
                         </div>
 
                         <div class="modal-step" id="editCustStep2">
@@ -972,18 +1000,34 @@ function editCustomer(customerId, row, cells) {
                                     <div class="form-group-elegant">
                                         <label>Customer Type *</label>
                                         <select name="customerType" class="elegant-select" required>
-                                            <option value="residential" ${customer.type === 'residential' ? 'selected' : ''}>Residential</option>
-                                            <option value="commercial-a" ${customer.type === 'commercial-a' ? 'selected' : ''}>Comm A</option>
-                                            <option value="commercial-b" ${customer.type === 'commercial-b' ? 'selected' : ''}>Comm B</option>
-                                            <option value="full-commercial" ${customer.type === 'full-commercial' ? 'selected' : ''}>Full Comm</option>
+                                            <option value="residential" ${customer.type === 'residential' ? 'selected' : ''}>Residential / Government</option>
+                                            <option value="commercial-a" ${customer.type === 'commercial-a' ? 'selected' : ''}>Semi-Commercial A</option>
+                                            <option value="commercial-b" ${customer.type === 'commercial-b' ? 'selected' : ''}>Semi-Commercial B</option>
+                                            <option value="commercial-c" ${customer.type === 'commercial-c' ? 'selected' : ''}>Semi-Commercial C</option>
+                                            <option value="full-commercial" ${customer.type === 'full-commercial' ? 'selected' : ''}>Commercial / Industrial</option>
+                                            <option value="bulk" ${customer.type === 'bulk' ? 'selected' : ''}>Bulk / Wholesale</option>
                                         </select>
                                     </div>
                                 </div>
                                 <div class="form-row-elegant">
                                     <div class="form-group-elegant">
+                                        <label>Meter Size *</label>
+                                        <select name="meterSize" class="elegant-select" required>
+                                            <option value='1/2"' ${customer.meterSize === '1/2"' ? 'selected' : ''}>1/2"</option>
+                                            <option value='3/4"' ${customer.meterSize === '3/4"' ? 'selected' : ''}>3/4"</option>
+                                            <option value='1"' ${customer.meterSize === '1"' ? 'selected' : ''}>1"</option>
+                                            <option value='1 1/2"' ${customer.meterSize === '1 1/2"' ? 'selected' : ''}>1 1/2"</option>
+                                            <option value='2"' ${customer.meterSize === '2"' ? 'selected' : ''}>2"</option>
+                                            <option value='3"' ${customer.meterSize === '3"' ? 'selected' : ''}>3"</option>
+                                            <option value='4"' ${customer.meterSize === '4"' ? 'selected' : ''}>4"</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group-elegant">
                                         <label>Meter Number *</label>
                                         <input type="text" name="meterNumber" value="${customer.meterNumber}" required />
                                     </div>
+                                </div>
+                                <div class="form-row-elegant">
                                     <div class="form-group-elegant">
                                         <label>Account Status</label>
                                         <select name="status" class="elegant-select">
@@ -991,29 +1035,24 @@ function editCustomer(customerId, row, cells) {
                                             <option value="inactive" ${customer.status === 'inactive' ? 'selected' : ''}>Inactive</option>
                                         </select>
                                     </div>
-                                </div>
                                 <div class="form-group-elegant checkbox-form-group" style="margin-top: 0.5rem;">
                                      <label class="checkbox-label premium-cb" style="padding: 0.5rem; border-radius: 10px;">
                                         <input type="checkbox" name="discount" value="true" ${customer.discount ? 'checked' : ''} />
                                         <div class="cb-text">
-                                            <span class="cb-title" style="font-size: 0.85rem;">Senior / PWD Discount</span>
+                                            <span class="cb-title" style="font-size: 0.85rem;">Senior Citizen Discount</span>
                                             <span class="cb-sub" style="font-size: 0.7rem;">Apply ${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 20}% off</span>
                                         </div>
                                     </label>
                                 </div>
                             </div>
-                        </div>
-
-                        <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.75rem;">
-                            <button type="button" class="btn-premium-secondary" id="editCustBack" style="display: none; padding: 0.5rem 1rem;">
-                                <i class="fas fa-arrow-left"></i> Back
-                            </button>
-                            <button type="button" class="btn-premium-primary" id="editCustNext" style="padding: 0.5rem 1.5rem; margin-left: auto;">
-                                Next <i class="fas fa-arrow-right"></i>
-                            </button>
-                            <button type="submit" class="btn-premium-primary" id="editCustSubmit" style="display: none; margin-left: auto; padding: 0.5rem 1.5rem;">
-                                <i class="fas fa-check-circle"></i> Update
-                            </button>
+                            <div class="stepper-actions" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: flex-end;">
+                                <button type="button" class="btn-premium-secondary" id="editCustBack" style="padding: 0.5rem 1rem; margin-right: 0.5rem;">
+                                    <i class="fas fa-arrow-left"></i> Back
+                                </button>
+                                <button type="submit" class="btn-premium-primary" id="editCustSubmit" style="padding: 0.5rem 1.5rem;">
+                                    <i class="fas fa-check-circle"></i> Update
+                                </button>
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -1055,19 +1094,28 @@ function editCustomer(customerId, row, cells) {
         });
 
         fill.style.width = currentStep === 1 ? '0%' : '100%';
-        btnBack.style.display = currentStep === 1 ? 'none' : 'flex';
-        btnNext.style.display = currentStep === totalSteps ? 'none' : 'flex';
-        btnSubmit.style.display = currentStep === totalSteps ? 'flex' : 'none';
     }
 
-    btnNext.addEventListener('click', () => {
-        currentStep++;
-        updateStepper();
-    });
+    // Attach listener via event delegation to handle buttons inside active steps
+    document.getElementById('editCustomerForm').addEventListener('click', (e) => {
+        const nextBtn = e.target.closest('#editCustNext');
+        const backBtn = e.target.closest('#editCustBack');
 
-    btnBack.addEventListener('click', () => {
-        currentStep--;
-        updateStepper();
+        if (nextBtn) {
+            e.preventDefault();
+            if (currentStep < totalSteps) {
+                currentStep++;
+                updateStepper();
+            }
+        }
+        
+        if (backBtn) {
+            e.preventDefault();
+            if (currentStep > 1) {
+                currentStep--;
+                updateStepper();
+            }
+        }
     });
 
     document.getElementById('editCustomerForm').addEventListener('submit', async (e) => {
@@ -1144,7 +1192,6 @@ function editStaff(staffId, row, cells) {
                                     <select name="status" class="elegant-select">
                                         <option value="active" ${staff.status === 'active' ? 'selected' : ''}>Active</option>
                                         <option value="inactive" ${staff.status === 'inactive' ? 'selected' : ''}>Inactive</option>
-                                        <option value="pending" ${staff.status === 'pending' ? 'selected' : ''}>Pending</option>
                                     </select>
                                 </div>
                             </div>

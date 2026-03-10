@@ -119,7 +119,12 @@ serve(async (req) => {
             email: email,
             password: password,
             email_confirm: true,
-            user_metadata: { role: role }
+            user_metadata: { 
+                role: role,
+                first_name: firstName,
+                last_name: lastName,
+                full_name: `${firstName} ${lastName}`
+            }
         });
 
         if (createUserError) {

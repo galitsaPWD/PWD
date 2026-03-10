@@ -54,7 +54,7 @@
 
                             <div class="form-row">
                                 <div class="form-group-elegant">
-                                    <label>Consumption (m³)</label>
+                                    <label>Consumption (cu.m.)</label>
                                     <input type="number" id="readingConsumption" class="form-control" readonly value="0">
                                 </div>
                                 <div class="form-group-elegant">
@@ -224,7 +224,9 @@
             let penaltyAmount = 0;
             if (shouldApplyPenalty) {
                 const penaltyRate = (parseFloat(settings.penalty_percentage) || 20) / 100;
-                penaltyAmount = parseFloat(bill.balance) * penaltyRate;
+                // NEW PLAN: Penalty on CURRENT bill amount (Base + Consumption), ignoring Arrears
+                const currentCharges = parseFloat(bill.base_charge || 0) + parseFloat(bill.consumption_charge || 0);
+                penaltyAmount = currentCharges * penaltyRate;
             }
 
             const totalDue = parseFloat(bill.balance) + penaltyAmount;
@@ -248,6 +250,17 @@
                             </button>
                         </div>
                         <div class="modal-body">
+                            ${customer.status === 'inactive' ? `
+                            <div class="deactivated-danger-banner">
+                                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                                <div>
+                                    <div style="font-size: 1.1rem;">ACCOUNT DEACTIVATED</div>
+                                    <div style="font-weight: 400; opacity: 0.9;">Full payment required for reconnection eligibility.</div>
+                                    ${customer.disconnection_date ? `<div style="font-weight: 400; font-size: 0.85rem; opacity: 0.85; margin-top: 4px;">Disconnected on: ${new Date(customer.disconnection_date).toLocaleDateString()}${customer.disconnection_bill_id ? ' | Bill: BIL-' + customer.disconnection_bill_id : ''}</div>` : ''}
+                                </div>
+                            </div>
+                            ` : ''}
+                            
                             <div class="payment-info-card">
                                 <div class="info-row">
                                     <span>Customer:</span>
@@ -439,10 +452,15 @@
             const middleInitial = customer.middle_initial ? ` ${customer.middle_initial}.` : '';
             const customerName = `${customer.last_name}, ${customer.first_name}${middleInitial}`;
 
-            // Settings for logic
-            const settings = await window.cashierDb.loadSystemSettings();
+            // Settings and Schedules for logic
+            const [settings, schedules] = await Promise.all([
+                window.cashierDb.loadSystemSettings(),
+                window.cashierDb.loadRateSchedules()
+            ]);
 
-            const data = window.BillingEngine.calculate(bill, customer, settings);
+            const schedule = schedules.find(s => s.category_key === customer.customer_type);
+
+            const data = window.BillingEngine.calculate(bill, customer, settings, schedule);
             const invoiceHTML = window.BillingEngine.generateInvoiceHTML(bill, customer, data, { customerName });
 
             const modalHTML = `

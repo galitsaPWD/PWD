@@ -6,20 +6,11 @@
 (function () {
     const BillingEngine = {
         /**
-         * Securely escapes HTML special characters to prevent XSS
-         * @param {string} str - The string to escape
-         * @returns {string} - The escaped string
+         * Securely escapes HTML special characters to prevent XSS.
+         * Delegates to the global window.escapeHTML from shared/utils.js.
          */
         escapeHTML(str) {
-            if (!str) return '';
-            const map = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            };
-            return String(str).replace(/[&<>"']/g, function (m) { return map[m]; });
+            return window.escapeHTML ? window.escapeHTML(str) : String(str || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[m]);
         },
 
         /**
@@ -28,44 +19,73 @@
          * @param {Object} customer - The customer record from DB
          * @param {Object} settings - System settings from DB
          */
-        calculate(bill, customer, settings) {
+        calculate(bill, customer, settings, schedule = null) {
             const consumption = parseFloat(bill.consumption) || 0;
-            const baseRate = parseFloat(settings.base_rate) || 150;
             const arrears = parseFloat(bill.arrears) || 0;
+            
+            // 1. Determine Base Rate (Minimum Charge) based on Meter Size
+            // Mapping from meter size display to schedule property
+            const meterMapping = {
+                '1/2"': 'min_charge_1_2',
+                '3/4"': 'min_charge_3_4',
+                '1"': 'min_charge_1',
+                '1 1/2"': 'min_charge_1_1_2',
+                '2"': 'min_charge_2',
+                '3"': 'min_charge_3',
+                '4"': 'min_charge_4'
+            };
+            
+            const meterField = meterMapping[customer.meter_size] || 'min_charge_1_2';
+            const baseRate = schedule ? (parseFloat(schedule[meterField]) || 0) : (parseFloat(settings.base_rate) || 260);
+            
+            // 2. Determine Classification Factor
+            const factor = schedule ? (parseFloat(schedule.factor) || 1.0) : 1.0;
 
-            // Tier Calculation
+            // 3. Tier Calculation (Apply Factor to Base Tier Rates)
             let consumptionCharge = 0;
-            const tiers = [
-                { threshold: settings.tier1_threshold || 10, rate: settings.tier1_rate || 15, label: 'Tier 1' },
-                { threshold: settings.tier2_threshold || 20, rate: settings.tier2_rate || 20, label: 'Tier 2' },
-                { threshold: Infinity, rate: settings.tier3_rate || 25, label: 'Tier 3' }
+            
+            // Tiers thresholds are fixed per PWD schedule: 11-20, 21-30, 31-40, 41-up
+            const tierBaseRates = schedule ? [
+                { threshold: 20, rate: parseFloat(schedule.tier1_rate) || 27.25, label: '11-20 m³' },
+                { threshold: 30, rate: parseFloat(schedule.tier2_rate) || 28.75, label: '21-30 m³' },
+                { threshold: 40, rate: parseFloat(schedule.tier3_rate) || 30.75, label: '31-40 m³' },
+                { threshold: Infinity, rate: parseFloat(schedule.tier4_rate) || 33.25, label: '41-UP m³' }
+            ] : [
+                { threshold: settings.tier1_threshold || 10, rate: settings.tier1_rate || 27.25, label: 'Tier 1' },
+                { threshold: settings.tier2_threshold || 20, rate: settings.tier2_rate || 28.75, label: 'Tier 2' },
+                { threshold: Infinity, rate: settings.tier3_rate || 30.75, label: 'Tier 3' }
             ];
 
             const breakdown = [];
-            let remaining = consumption;
-            let lastThreshold = 0;
+            // Minimum covers first 10 m³
+            let remaining = consumption > 10 ? consumption - 10 : 0;
+            let lastThreshold = 10;
 
-            for (let i = 0; i < tiers.length; i++) {
+            for (let i = 0; i < tierBaseRates.length; i++) {
                 if (remaining <= 0) break;
-                const tier = tiers[i];
+                const tier = tierBaseRates[i];
                 const availableInTier = tier.threshold - lastThreshold;
                 const usageInTier = Math.min(remaining, availableInTier);
-                const costInTier = usageInTier * tier.rate;
+                
+                // Final Rate = Base Tier Rate * Category Factor
+                const finalRate = tier.rate * factor;
+                const costInTier = usageInTier * finalRate;
 
                 consumptionCharge += costInTier;
                 breakdown.push({
-                    label: i === 0 ? `First ${tier.threshold} m³` : (tier.threshold === Infinity ? `Above ${lastThreshold} m³` : `Next ${availableInTier} m³`),
+                    label: tier.label,
                     usage: usageInTier,
-                    rate: tier.rate,
+                    rate: finalRate,
                     cost: costInTier,
-                    tierLabel: tier.label
+                    baseRate: tier.rate,
+                    factor: factor
                 });
 
                 remaining -= usageInTier;
                 lastThreshold = tier.threshold;
             }
 
-            // Penalty Calculation
+            // 4. Penalty Calculation
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const dueDate = new Date(bill.due_date);
@@ -73,18 +93,22 @@
 
             const isPastDue = today > dueDate;
             const shouldApplyPenalty = bill.status === 'overdue' || (bill.status === 'unpaid' && isPastDue);
-            const penaltyRate = (parseFloat(settings.penalty_percentage) || 20) / 100;
+            const penaltyRate = (settings.penalty_percentage != null ? parseFloat(settings.penalty_percentage) : 10) / 100;
+            // NEW PLAN: Penalty only on CURRENT charges (Base + Consumption), ignoring Arrears
             const penalty = shouldApplyPenalty ? (baseRate + consumptionCharge) * penaltyRate : 0;
 
-            // Discount Calculation
-            const discountPercent = parseFloat(settings.discount_percentage) || 20;
+            // 5. Discount Calculation (Senior/PWD)
+            const discountPercent = settings.discount_percentage != null ? parseFloat(settings.discount_percentage) : 5;
             const discountAmount = customer.has_discount ? (baseRate + consumptionCharge) * (discountPercent / 100) : 0;
 
-            // Totals
+            // 6. Consumption Limit Validation (15-20 m³)
+            const isAbnormalConsumption = consumption > 20;
+
+            // 7. Totals
             const totalDue = baseRate + consumptionCharge + penalty + arrears - discountAmount;
 
-            // Cut-off Logic
-            const cutoffDays = parseInt(settings.cutoff_days) || 17;
+            // 8. Cut-off Logic (Maintain existing logic)
+            const cutoffDays = parseInt(settings.cutoff_days) || parseInt(settings.cutoff_grace_period) || 17;
             const overdueDays = parseInt(settings.overdue_days) || 14;
             const delayAfterOverdue = cutoffDays - overdueDays;
             const cutoffDate = new Date(dueDate);
@@ -102,7 +126,9 @@
                 totalDue,
                 isPastDue,
                 isCutoff,
-                breakdown
+                isAbnormalConsumption,
+                breakdown,
+                factor
             };
         },
 
@@ -113,8 +139,15 @@
             const middleInitial = customer.middle_initial ? ` ${this.escapeHTML(customer.middle_initial)}.` : '';
             const customerName = options.customerName ? this.escapeHTML(options.customerName) : `${this.escapeHTML(customer.last_name)}, ${this.escapeHTML(customer.first_name)}${middleInitial}`;
             const address = this.escapeHTML(customer.address || '');
-            const businessStyle = this.escapeHTML(customer.customer_type || 'Residential');
-            const dateStr = window.formatLocalDateTime ? window.formatLocalDateTime(new Date(), false) : new Date().toLocaleDateString();
+            const accountId = window.getAccountID ? window.getAccountID(customer.id) : customer.id;
+            const businessStyle = this.escapeHTML(accountId);
+            
+            // MM/DD/YYYY Format for receipts as requested
+            const dateStr = new Date().toLocaleDateString('en-US', {
+                month: '2-digit',
+                day: '2-digit',
+                year: 'numeric'
+            });
 
             return `
                 <div class="service-invoice-paper">
@@ -149,7 +182,7 @@
                             <span class="ink-line" style="flex: 1;">${address}</span>
                         </div>
                         <div class="info-field">
-                            <label>Bus. Style</label>
+                            <label>Account No.</label>
                             <span class="ink-line" style="flex: 1;">${businessStyle}</span>
                         </div>
                         <div class="info-field">
@@ -185,7 +218,10 @@
                                 <div class="payment-row-item"><label>Installation fees</label><span class="ink-line" style="width: 100px;"></span></div>
                                 <div class="payment-row-item"><label>Notary/Inspection</label><span class="ink-line" style="width: 100px;"></span></div>
                                 <div class="payment-row-item"><label>Materials</label><span class="ink-line" style="width: 100px;"></span></div>
-                                <div class="payment-row-item"><label>Others</label><span class="ink-line" style="width: 100px;"></span></div>
+                                <div class="payment-row-item">
+                                    <label>Others</label>
+                                    <span class="ink-line" style="width: 100px; text-align: center;">${customer.has_discount ? 'Senior' : 'None'}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -228,7 +264,13 @@
             const customerName = options.customerName ? this.escapeHTML(options.customerName) : `${this.escapeHTML(customer.last_name)}, ${this.escapeHTML(customer.first_name)}${middleInitial}`;
             const accountNo = this.escapeHTML(window.getAccountID ? window.getAccountID(bill.customer_id) : bill.customer_id);
             const meterNo = this.escapeHTML(customer.meter_number || 'N/A');
-            const periodStr = window.formatLocalDateTime ? window.formatLocalDateTime(bill.reading_date, false) : bill.reading_date;
+            
+            const formatDateShort = (d) => {
+                if(!d) return 'N/A';
+                const date = new Date(d);
+                return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+            };
+            const periodStr = formatDateShort(bill.reading_date);
 
             const breakdownHTML = data.breakdown.map(b => `
                 <div class="breakdown-row"><span>${b.label}</span> <span>₱${b.cost.toLocaleString()}</span></div>
@@ -256,7 +298,7 @@
 
                     <div class="receipt-id-row">
                         <span>#BIL-${String(bill.id).padStart(4, '0')}</span>
-                        <span>${window.formatLocalDateTime ? window.formatLocalDateTime(new Date(), false) : new Date().toLocaleDateString()}</span>
+                        <span>${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}</span>
                     </div>
 
                     <section class="receipt-section">
@@ -268,7 +310,7 @@
                     </section>
 
                     <section class="receipt-section">
-                        <h4 class="receipt-section-title">Consumption (m³)</h4>
+                        <h4 class="receipt-section-title">Consumption (cu.m.)</h4>
                         <div class="receipt-reading-grid">
                             <div class="reading-item"><label>Previous</label><span>${bill.previous_reading}</span></div>
                             <div class="reading-item"><label>Current</label><span>${bill.current_reading}</span></div>
@@ -280,12 +322,12 @@
                         <h4 class="receipt-section-title">Charges Breakdown</h4>
                         <div class="receipt-row"><span class="receipt-label">Base Rate</span><span class="receipt-value">₱${data.baseRate.toLocaleString()}</span></div>
                         <div class="receipt-row"><span class="receipt-label">Consumption Charge</span><span class="receipt-value">₱${data.consumptionCharge.toLocaleString()}</span></div>
-                        <div class="receipt-row" style="padding-left: 1rem; opacity: 0.7; font-size: 0.8rem;"><span>Tiered Breakdown:</span></div>
+                        <div class="receipt-row" style="padding-left: 1rem; opacity: 0.7; font-size: 0.8rem;"><span>Tiered Breakdown (cu.m.):</span></div>
                         <div style="padding-left: 1rem; border-left: 2px solid #eee; margin-left: 0.5rem; margin-bottom: 1rem;">${breakdownHTML}</div>
 
                         ${customer.has_discount ? `
                         <div class="receipt-row" style="color: var(--primary); font-weight: 700;">
-                            <span class="receipt-label">SC/PWD Discount (${data.discountPercent}%)</span>
+                            <span class="receipt-label">Senior Citizen Discount (${data.discountPercent}%)</span>
                             <span class="receipt-value">-₱${data.discountAmount.toLocaleString()}</span>
                         </div>
                         ` : ''}
@@ -310,13 +352,13 @@
                         </div>
                         <div class="receipt-row" style="margin-top: 1rem; font-style: italic; color: #666;">
                             <span>Due Date:</span>
-                            <span>${window.formatLocalDateTime ? window.formatLocalDateTime(bill.due_date, false) : bill.due_date}</span>
+                            <span>${formatDateShort(bill.due_date)}</span>
                         </div>
                     </div>
 
                     <footer class="receipt-footer">
                         <p class="thanks-msg">Thank you for being a valued customer!</p>
-                        <p class="receipt-timestamp">Generated on ${window.formatLocalDateTime ? window.formatLocalDateTime(new Date()) : new Date().toLocaleString()}</p>
+                        <p class="receipt-timestamp">Generated on ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })} ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</p>
                     </footer>
                 </div>
             `;

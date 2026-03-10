@@ -23,7 +23,7 @@
      */
     function getLocalISODate(date = new Date()) {
         const d = new Date(date);
-        return d.toLocaleDateString('en-CA'); // en-CA format is YYYY-MM-DD
+        return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); // en-CA format is YYYY-MM-DD
     }
 
     /**
@@ -50,19 +50,32 @@
      */
     function formatLocalDateTime(dateString, includeTime = true) {
         if (!dateString) return 'N/A';
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) return dateString;
+
+        // Supabase returns timestamps without timezone (e.g. "2026-03-05T09:21:49.123")
+        // JS new Date() treats those as LOCAL time, not UTC — causing wrong time display.
+        // We force UTC interpretation by appending 'Z' if no tz info is present.
+        let normalized = dateString;
+        if (typeof dateString === 'string' &&
+            (dateString.includes('T') || dateString.includes(' ')) &&
+            !dateString.endsWith('Z') && !dateString.includes('+')) {
+            normalized = dateString.replace(' ', 'T') + 'Z';
+        }
+
+        const date = new Date(normalized);
+        if (isNaN(date.getTime())) return String(dateString);
 
         const options = {
             year: 'numeric',
             month: 'long',
-            day: 'numeric'
+            day: 'numeric',
+            timeZone: 'Asia/Manila'
         };
         if (includeTime) {
             options.hour = '2-digit';
             options.minute = '2-digit';
+            options.hour12 = true;
         }
-        return date.toLocaleDateString(undefined, options);
+        return date.toLocaleString('en-US', options);
     }
 
     /**
@@ -114,8 +127,7 @@
             modal.style.opacity = '0';
             setTimeout(() => {
                 modal.style.display = 'none';
-                // Only remove if it was NOT a permanent modal (injected dynamically)
-                // For now, consistent behavior: hidden is safer for dashboard modals.
+                modal.style.removeProperty('opacity');
             }, 300);
         }
     }
@@ -198,6 +210,59 @@
             timeout = setTimeout(() => func.apply(context, args), wait);
         };
     }
+    /**
+     * Normalize billing periods strings consistently (e.g. "Mar 2026" -> "March 2026")
+     */
+    function normalizePeriod(period) {
+        if (!period) return null;
+        const str = period.trim();
+
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const shortNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        // Handle "MM/DD/YYYY" full date format (e.g., "02/18/2026")
+        const dateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (dateMatch) {
+            const monthIdx = parseInt(dateMatch[1]) - 1;
+            if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${dateMatch[3]}`;
+        }
+
+        // Try "YYYY-MM-DD" ISO date format (e.g., "2026-02-18")
+        const isoDateMatch = str.match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
+        if (isoDateMatch) {
+            const monthIdx = parseInt(isoDateMatch[2]) - 1;
+            if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${isoDateMatch[1]}`;
+        }
+
+        // Try "M/YYYY" or "MM/YYYY" (e.g., "2/2026")
+        const slashMatch = str.match(/^(\d{1,2})[\/\-\s](\d{4})$/);
+        if (slashMatch) {
+            const monthIdx = parseInt(slashMatch[1]) - 1;
+            if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${slashMatch[2]}`;
+        }
+
+        // Handle string months like "March 2026" or "Mar 2026"
+        const words = str.split(/[\s-]+/);
+        if (words.length >= 2) {
+            const mStr = words[0].toLowerCase();
+            const yStr = words[words.length - 1]; // last word is year
+            const yearMatch = yStr.match(/^20\d{2}$/); // "2026", "2025"
+            
+            if (yearMatch) {
+                for (let i = 0; i < 12; i++) {
+                    if (mStr === monthNames[i].toLowerCase() || mStr === shortNames[i].toLowerCase() || mStr.startsWith(shortNames[i].toLowerCase())) {
+                        return `${monthNames[i]} ${yStr}`;
+                    }
+                }
+            }
+        }
+
+        // Fallback: capitalize first letter
+        if (str.length > 0) {
+            return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+        }
+        return str;
+    }
 
     // Export to window
     window.pwdUtils = {
@@ -209,7 +274,8 @@
         getBarangay,
         debounce,
         escapeHTML,
-        initPasswordToggles
+        initPasswordToggles,
+        normalizePeriod
     };
 
     // Global overrides for backward compatibility
@@ -222,4 +288,5 @@
     window.debounce = debounce;
     window.escapeHTML = escapeHTML;
     window.initPasswordToggles = initPasswordToggles;
+    window.normalizePeriod = normalizePeriod;
 })();

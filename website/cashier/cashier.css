@@ -1,8 +1,64 @@
 /* Cashier Specific Styles (Standalone) - Using shared/common.css */
 
+/* === PREMIUM CUSTOM SCROLLBARS === */
+:root {
+    --scrollbar-track: transparent;
+    --scrollbar-thumb: rgba(100, 116, 139, 0.4); /* Glass UI Slate */
+    --scrollbar-thumb-hover: var(--cashier-primary, #00897B);
+}
 
+.dark-theme, body.dark-theme {
+    --scrollbar-thumb: rgba(255, 255, 255, 0.2); /* Frosted Glass */
+    --scrollbar-thumb-hover: var(--cashier-primary, #00BFA5); /* Bright teal on dark mode */
+}
 
-/* (Specialized Cashier components continue below) */
+/* Target scrolling containers explicitly to bypass Chrome body bugs */
+::-webkit-scrollbar,
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+.main-content::-webkit-scrollbar,
+.table-container::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar {
+    width: 8px !important;
+    height: 8px !important;
+}
+
+::-webkit-scrollbar-track,
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track,
+.main-content::-webkit-scrollbar-track,
+.table-container::-webkit-scrollbar-track,
+.modal-body::-webkit-scrollbar-track {
+    background: var(--scrollbar-track) !important;
+}
+
+::-webkit-scrollbar-thumb,
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb,
+.main-content::-webkit-scrollbar-thumb,
+.table-container::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb) !important;
+    border-radius: 10px !important;
+    border: 2px solid transparent !important;
+    background-clip: content-box !important;
+    transition: background-color 0.3s ease !important;
+}
+
+::-webkit-scrollbar-thumb:hover,
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover,
+.main-content::-webkit-scrollbar-thumb:hover,
+.table-container::-webkit-scrollbar-thumb:hover,
+.modal-body::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover) !important;
+}
+
+/* Force color scheme for Dark Mode */
+html.dark-theme, body.dark-theme {
+    color-scheme: dark;
+}
+
 
 
 /* === LAYOUT COMPONENTS === */
@@ -196,6 +252,67 @@
     padding: 2px 6px;
 }
 
+.badge-status.paid { background: #e6fffa; color: #234e52; }
+.badge-status.unpaid { background: #fffaf0; color: #7b341e; }
+.badge-status.overdue { background: #fff5f5; color: #c53030; }
+.badge-status.partial { background: #ebf8ff; color: #2c5282; }
+.badge-status.inactive { 
+    background: #ef4444 !important; 
+    color: white !important; 
+    font-weight: 800 !important;
+    text-transform: uppercase;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+}
+
+/* ── Deactivated Row Styling (Synced with Admin) ── */
+tr.status-inactive {
+    background-color: rgba(239, 68, 68, 0.03) !important;
+    border-left: 2px solid rgba(239, 68, 68, 0.5) !important;
+}
+
+tr.status-inactive > td:first-child {
+    padding-left: 14px;
+}
+
+tr.status-inactive .customer-info h4,
+tr.status-inactive strong {
+    color: var(--text-secondary);
+    opacity: 0.65;
+}
+
+tr.status-inactive .account-id,
+tr.status-inactive .mono {
+    opacity: 0.45;
+}
+
+/* Inline deactivated label — small, muted, clean */
+.badge-deactivated {
+    display: inline-block;
+    font-size: 0.55rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #ef4444;
+    opacity: 0.75;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+/* Deactivated Banner for Payment Modal */
+.deactivated-danger-banner {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+    padding: 12px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+
 /* Status Badges Alignment (Mirroring Admin Design) */
 .badge-status {
     padding: 0.4rem 0.8rem;
@@ -228,8 +345,8 @@
     border: 1px solid rgba(76, 175, 80, 0.2);
 }
 
-.status-inactive,
-.status-overdue,
+.badge-status.status-inactive,
+.badge-status.status-overdue,
 .status-danger {
     background-color: rgba(244, 67, 54, 0.1);
     color: #F44336;
@@ -1203,6 +1320,33 @@ td .badge[class*="status-"] {
     white-space: nowrap;
 }
 
+/* Ultra-Compact Phase for Cashier */
+#billingPage .data-table th {
+    padding: 0.8rem 1rem;
+}
+
+#billingPage .data-table td {
+    padding: 0.6rem 1rem;
+}
+
+#billingPage .customer-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+#billingPage .customer-name {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+#billingPage .customer-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
 .data-table td {
     padding: 1rem 1rem;
     border-bottom: 1px solid var(--border);
@@ -1667,40 +1811,6 @@ body.dark-theme .meter-number {
 /* (Dark theme and modal specifics handled by common.css) */
 
 
-/* === CUSTOM SCROLLBAR === */
-::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-}
-
-::-webkit-scrollbar-track {
-    background: transparent;
-    border-radius: 5px;
-}
-
-::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    /* Slate 300 */
-    border-radius: 5px;
-    border: 2px solid transparent;
-    background-clip: content-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
-    /* Slate 400 */
-}
-
-/* Dark Mode Scrollbar */
-body.dark-theme ::-webkit-scrollbar-thumb {
-    background: #334155;
-    /* Slate 700 */
-}
-
-body.dark-theme ::-webkit-scrollbar-thumb:hover {
-    background: #475569;
-    /* Slate 600 */
-}
 
 /* === BALANCE TOOLTIP === */
 .balance-info-trigger {
@@ -1713,17 +1823,18 @@ body.dark-theme ::-webkit-scrollbar-thumb:hover {
 .balance-tooltip {
     position: absolute;
     top: 50%;
-    left: calc(100% + 12px);
-    transform: translateY(-50%) translateX(-10px);
+    right: calc(100% + 8px); /* Open to the left to prevent table cutoff */
+    left: auto;
+    transform: translateY(-50%) translateX(10px);
     background: #ffffff;
     border: 1px solid #e2e8f0;
     border-radius: 12px;
     padding: 1rem;
-    width: 220px;
+    width: 200px; /* narrowing slightly for cleaner look */
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
     opacity: 0;
     visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
     z-index: 9999;
     pointer-events: none;
     line-height: 1.4;
@@ -1731,19 +1842,30 @@ body.dark-theme ::-webkit-scrollbar-thumb:hover {
     white-space: normal;
 }
 
-/* Tooltip Arrow (Left) */
+/* Hover Bridge to prevent mouse falling off */
+.balance-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -15px; /* extends transparent hitbox to cover gap */
+    width: 20px;
+}
+
+/* Tooltip Arrow (Pointing Right to trigger) */
 .balance-tooltip::before {
     content: '';
     position: absolute;
-    left: -6px;
+    right: -6px;
+    left: auto;
     top: 50%;
     transform: translateY(-50%) rotate(45deg);
     width: 10px;
     height: 10px;
     background: inherit;
     border: inherit;
-    border-right-color: transparent !important;
-    border-top-color: transparent !important;
+    border-left-color: transparent !important;
+    border-bottom-color: transparent !important;
     z-index: -1;
 }
 
@@ -1757,6 +1879,7 @@ body.dark-theme ::-webkit-scrollbar-thumb:hover {
 .balance-info-trigger:hover .balance-tooltip {
     opacity: 1;
     visibility: visible;
+    pointer-events: auto; /* Allow clicking buttons inside */
     transform: translateY(-50%) translateX(0);
 }
 

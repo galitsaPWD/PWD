@@ -323,6 +323,9 @@
                             <option value="">All Periods</option>
                             <!-- Populated dynamically -->
                         </select>
+                        <select id="billingBarangayFilter" class="filter-select">
+                            <option value="">All Barangays</option>
+                        </select>
                     </div>
                 </div>
 
@@ -372,25 +375,32 @@
                     </div>
                 </div>
 
-                <div class="filter-bar">
-                    <div class="search-box">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="logSearch" placeholder="Search customer or ref..." class="form-control">
+                <div class="filter-bar" style="display: flex; flex-direction: column; gap: 0.8rem; align-items: stretch; width: 100%;">
+                    <!-- Row 1: Search + Quick Filters -->
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: nowrap; width: 100%;">
+                        <div class="search-box" style="flex: 1; min-width: 0;">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="logSearch" placeholder="Search customer or ref..." class="form-control">
+                        </div>
+                        <div class="quick-filters" style="display: flex; gap: 0.4rem; flex-shrink: 0;">
+                            <button class="btn btn-sm btn-outline active" onclick="setQuickDate('all')">All</button>
+                            <button class="btn btn-sm btn-outline" onclick="setQuickDate('today')">Today</button>
+                            <button class="btn btn-sm btn-outline" onclick="setQuickDate('week')">Week</button>
+                        </div>
                     </div>
-
-                    <div class="quick-filters">
-                        <button class="btn btn-sm btn-outline active" onclick="setQuickDate('all')">All</button>
-                        <button class="btn btn-sm btn-outline" onclick="setQuickDate('today')">Today</button>
-                        <button class="btn btn-sm btn-outline" onclick="setQuickDate('week')">Week</button>
-                    </div>
-
-                    <div class="date-filter">
-                        <label>From:</label>
-                        <input type="date" id="logDateFrom">
-                    </div>
-                    <div class="date-filter">
-                        <label>To:</label>
-                        <input type="date" id="logDateTo">
+                    <!-- Row 2: Date Range + Barangay -->
+                    <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                        <div class="date-filter" style="flex-shrink: 0;">
+                            <label>From:</label>
+                            <input type="date" id="logDateFrom">
+                        </div>
+                        <div class="date-filter" style="flex-shrink: 0;">
+                            <label>To:</label>
+                            <input type="date" id="logDateTo">
+                        </div>
+                        <select id="logBarangayFilter" class="filter-select" style="flex-shrink: 0;">
+                            <option value="">All Barangays</option>
+                        </select>
                     </div>
                 </div>
 
@@ -449,26 +459,27 @@
             <div class="page" id="ledgerPage">
                 <div class="ledger-header">
                     <div class="ledger-controls">
-                        <div class="filter-bar">
-                            <div class="search-box">
+                        <div class="filter-bar" style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: nowrap; width: 100%;">
+                            <div class="search-box" style="flex: 1; min-width: 200px;">
                                 <i class="fas fa-search"></i>
                                 <input type="text" id="ledgerSearch" placeholder="Search customer or account ID...">
                             </div>
-                            <div class="filter-group">
-                                <select id="ledgerBarangayFilter" class="filter-select">
-                                    <option value="">All Barangays</option>
-                                    <!-- Populated by JS -->
-                                </select>
+                            <select id="ledgerBarangayFilter" class="filter-select">
+                                <option value="">All Barangays</option>
+                                <!-- Populated by JS -->
+                            </select>
+                            <select id="ledgerPeriodFilter" class="filter-select">
+                                <option value="">All Periods</option>
+                            </select>
+                            <div style="display: flex; gap: 0.5rem; margin-left: auto; flex-shrink: 0;">
+                                <button class="btn btn-secondary" id="backToMasterBtn" style="display: none;">
+                                    <i class="fas fa-arrow-left"></i> Back
+                                </button>
+                                <button class="btn btn-primary" id="printLedgerBtn">
+                                    <i class="fas fa-print"></i> Print Report
+                                </button>
                             </div>
                         </div>
-                    </div>
-                    <div class="ledger-actions">
-                        <button class="btn btn-secondary" id="backToMasterBtn" style="display: none;">
-                            <i class="fas fa-arrow-left"></i> Back
-                        </button>
-                        <button class="btn btn-primary" id="printLedgerBtn">
-                            <i class="fas fa-print"></i> Print Report
-                        </button>
                     </div>
                 </div>
 

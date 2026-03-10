@@ -2,47 +2,7 @@
 
 // Helpers are now partially moved to shared/utils.js
 
-// Utility mapping for period normalization
-const periodAliases = {
-    'january': 'jan', 'february': 'feb', 'march': 'mar', 'april': 'apr',
-    'may': 'may', 'june': 'jun', 'july': 'jul', 'august': 'aug',
-    'september': 'sep', 'october': 'oct', 'november': 'nov', 'december': 'dec'
-};
-function normalizePeriod(period) {
-    if (!period) return null;
-    const str = period.trim();
 
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-    // Already in "Month Year" format (e.g., "February 2026")
-    for (const m of monthNames) {
-        if (str.toLowerCase().startsWith(m.toLowerCase())) return str;
-    }
-
-    // Handle "MM/DD/YYYY" full date format (e.g., "02/18/2026")
-    const dateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (dateMatch) {
-        const monthIdx = parseInt(dateMatch[1]) - 1;
-        if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${dateMatch[3]}`;
-    }
-
-    // Try "YYYY-MM-DD" ISO date format (e.g., "2026-02-18")
-    const isoDateMatch = str.match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
-    if (isoDateMatch) {
-        const monthIdx = parseInt(isoDateMatch[2]) - 1;
-        if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${isoDateMatch[1]}`;
-    }
-
-    // Try "M/YYYY" or "MM/YYYY" (e.g., "2/2026")
-    const slashMatch = str.match(/^(\d{1,2})[\/\-\s](\d{4})$/);
-    if (slashMatch) {
-        const monthIdx = parseInt(slashMatch[1]) - 1;
-        if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${slashMatch[2]}`;
-    }
-
-    // Fallback: return as-is
-    return str;
-}
 
 // === CUSTOMERS ===
 async function loadCustomers(options = {}) {
@@ -109,11 +69,13 @@ async function loadCustomers(options = {}) {
             const displayName = `${c.last_name}, ${c.first_name}${middleInitial}`;
 
             return `
-            <tr data-id="${c.id}" 
+            <tr class="${(c.status || 'active').toLowerCase() === 'inactive' ? 'status-inactive' : ''}"
+                data-id="${c.id}" 
                 data-last-name="${c.last_name}" 
                 data-first-name="${c.first_name}" 
                 data-middle-initial="${c.middle_initial || ''}"
                 data-type="${c.customer_type}"
+                data-meter-size="${c.meter_size || '1/2\"'}"
                 data-discount="${c.has_discount}"
                 data-address="${c.address}"
                 data-contact="${c.contact_number || ''}"
@@ -123,19 +85,20 @@ async function loadCustomers(options = {}) {
                 <td>
                     <div class="name-column">
                         <span class="display-name">${displayName}</span>
-                        ${hasDiscount ? `<span class="badge info">PWD/SC</span>` : ''}
+                        ${(c.status || 'active').toLowerCase() === 'inactive' ? '<span class="badge-deactivated">DEACTIVATED</span>' : ''}
+                        ${hasDiscount ? `<span class="badge info">Senior Citizen</span>` : ''}
                     </div>
                 </td>
                 <td><div class="barangay-display" title="${c.address}">${getBarangay(c.address)}</div></td>
                 <td><span class="meter-number">${c.meter_number || 'N/A'}</span></td>
                 <td><span class="contact-number">${c.contact_number || 'N/A'}</span></td>
-                <td><span class="badge purple">${c.customer_type || 'Residential'}</span></td>
+                <td><span class="badge purple">${(c.customer_type || 'Residential').replace('-', ' ').toUpperCase()}</span></td>
                 <td><span class="badge status-${(c.status || 'active').toLowerCase()}">${c.status || 'Active'}</span></td>
                 ${!hideActions ? `
                 <td>
                     <div class="action-buttons">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon delete" title="Delete"><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon delete" title="Delete" ${c.status === 'inactive' ? 'disabled' : ''}><i class="fas fa-trash"></i></button>
                     </div>
                 </td>` : ''}
             </tr>
@@ -149,6 +112,20 @@ async function loadCustomers(options = {}) {
 
 async function addCustomer(customerData) {
     try {
+        // 1. Check if meter number already exists to prevent 409 Conflict
+        const { data: existing, error: checkError } = await supabase
+            .from('customers')
+            .select('id, last_name, first_name')
+            .eq('meter_number', customerData.meterNumber)
+            .maybeSingle();
+
+        if (checkError) console.warn('[addCustomer] Check Error:', checkError);
+        
+        if (existing) {
+            throw new Error(`Meter Number "${customerData.meterNumber}" is already assigned to ${existing.first_name} ${existing.last_name} (ID: ${existing.id}).`);
+        }
+
+        // 2. Proceed with insert
         const { error } = await supabase
             .from('customers')
             .insert([{
@@ -159,17 +136,28 @@ async function addCustomer(customerData) {
                 contact_number: customerData.contact,
                 meter_number: customerData.meterNumber,
                 customer_type: customerData.customerType,
+                meter_size: customerData.meterSize || '1/2"',
                 status: customerData.status,
                 has_discount: customerData.discount
             }]);
 
-        if (error) throw error;
+        if (error) {
+            if (error.code === '23505') { // Postgres Unique Violation
+                throw new Error(`Duplicate Data: Meter Number "${customerData.meterNumber}" already exists.`);
+            }
+            throw error;
+        }
+
         showNotification('Customer added successfully', 'success');
-        loadCustomers();
-        loadDashboardStats();
+        if (window.dbOperations && window.dbOperations.loadCustomers) {
+            window.dbOperations.loadCustomers();
+        }
+        if (window.dbOperations && window.dbOperations.loadDashboardStats) {
+            window.dbOperations.loadDashboardStats();
+        }
     } catch (error) {
         console.error('Error adding customer:', error);
-        showNotification(error.message, 'error');
+        showNotification(error.message || 'Failed to add customer', 'error');
         throw error;
     }
 }
@@ -186,6 +174,7 @@ async function updateCustomer(id, customerData) {
                 contact_number: customerData.contact,
                 meter_number: customerData.meterNumber,
                 customer_type: customerData.customerType,
+                meter_size: customerData.meterSize || '1/2"',
                 status: customerData.status,
                 has_discount: customerData.discount,
                 updated_at: new Date()
@@ -194,6 +183,14 @@ async function updateCustomer(id, customerData) {
 
         if (error) throw error;
         showNotification('Customer updated successfully', 'success');
+        
+        // Recalculate unpaid bills for this customer if discount/type changed.
+        // Pass currentMonthOnly=false so ALL their pending bills get updated, not just the current month.
+        if (customerData.discount !== undefined || customerData.customerType !== undefined || customerData.meterSize !== undefined) {
+             console.log('[updateCustomer] Triggering full recalculation for customer:', id);
+             await recalculateUnpaidBills(id, false);
+        }
+
         // Preserve active filter/search state when refreshing
         if (window.refreshCustomers) window.refreshCustomers();
         else loadCustomers();
@@ -239,8 +236,6 @@ async function loadStaff(options = {}) {
             .order('last_name');
 
         if (error) throw error;
-
-        const resultData = data;
 
         // Enhanced multi-dimensional filtering
         const filteredData = data.filter(s => {
@@ -361,46 +356,53 @@ async function updateStaff(id, staffData) {
 }
 
 async function deleteStaff(id) {
-    if (!confirm('Are you sure you want to delete this staff member? This action cannot be undone.')) return;
+    const doDelete = async () => {
+        try {
+            // 1. Get auth_uid first (Secure Deletion)
+            const { data: staff, error: fetchError } = await supabase
+                .from('staff')
+                .select('auth_uid')
+                .eq('id', id)
+                .single();
 
-    try {
-        // 1. Get auth_uid first (Secure Deletion)
-        const { data: staff, error: fetchError } = await supabase
-            .from('staff')
-            .select('auth_uid')
-            .eq('id', id)
-            .single();
+            if (fetchError) throw fetchError;
 
-        if (fetchError) throw fetchError;
+            if (staff.auth_uid) {
+                // 2. Call Edge Function to delete Auth User (prevents future logins)
+                const { data, error: deleteParamError } = await supabase.functions.invoke('delete-user', {
+                    body: { uid: staff.auth_uid }
+                });
 
-        if (staff.auth_uid) {
-            // 2. Call Edge Function to delete Auth User (prevents future logins)
-            const { data, error: deleteParamError } = await supabase.functions.invoke('delete-user', {
-                body: { uid: staff.auth_uid }
-            });
-
-            if (deleteParamError) {
-                console.error("Failed to delete auth user (Network/System):", deleteParamError);
-            } else if (!data || !data.success) {
-                console.error("Failed to delete auth user (Logic):", data?.error);
-            } else {
-                console.log("Auth user deleted successfully");
+                if (deleteParamError) {
+                    console.error("Failed to delete auth user (Network/System):", deleteParamError);
+                } else if (!data || !data.success) {
+                    console.error("Failed to delete auth user (Logic):", data?.error);
+                } else {
+                    console.log("Auth user deleted successfully");
+                }
             }
+
+            // 3. Delete from staff table
+            const { error } = await supabase
+                .from('staff')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+            showNotification('Staff deleted successfully!', 'success');
+            loadStaff();
+        } catch (error) {
+            console.error('Error deleting staff:', error);
+            showNotification('Failed to delete staff', 'error');
         }
+    };
 
-        // 3. Delete from staff table
-        const { error } = await supabase
-            .from('staff')
-            .delete()
-            .eq('id', id);
-
-        if (error) throw error;
-        showNotification('Staff deleted successfully!', 'success');
-        loadStaff();
-    } catch (error) {
-        console.error('Error deleting staff:', error);
-        showNotification('Failed to delete staff', 'error');
-    }
+    window.showConfirmModal({
+        title: 'Delete Staff Member?',
+        message: 'Are you sure you want to delete this staff member? This will also remove their login access. This action cannot be undone.',
+        confirmText: 'Delete Forever',
+        onConfirm: doDelete
+    });
 }
 
 async function changeStaffPassword(staffId, newPassword) {
@@ -476,7 +478,7 @@ async function loadBilling(filters = {}) {
     if (!tbody) return;
 
     try {
-        const { search = '', status = '', month = '' } = filters;
+        const { search = '', status = '', month = '', barangay = '' } = filters;
 
         // 1. Fetch bills - Latest PAID at top (using payment_date descending)
         // Unpaid bills (null payment_date) will appear at the bottom by default in PostgreSQL
@@ -493,7 +495,7 @@ async function loadBilling(filters = {}) {
         const customerIds = [...new Set(bills.map(b => b.customer_id))];
         const { data: customers, error: customerError } = await supabase
             .from('customers')
-            .select('id, first_name, last_name, middle_initial, meter_number, address')
+            .select('id, first_name, last_name, middle_initial, meter_number, address, status, disconnection_date')
             .in('id', customerIds);
 
         if (customerError) throw customerError;
@@ -557,36 +559,66 @@ async function loadBilling(filters = {}) {
                     const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
                     return diffDays >= cutoffGrace;
                 });
+            } else if (status === 'disconnected') {
+                filteredData = filteredData.filter(b => b.customers?.status === 'inactive');
             } else {
                 filteredData = filteredData.filter(b => b.status === status);
             }
         }
 
         if (month) {
-            filteredData = filteredData.filter(b => b.billing_period === month);
+            // Compare normalized versions so "Mar 2026" matches "March 2026"
+            const searchMonth = normalizePeriod(month);
+            
+            filteredData = filteredData.filter(b => {
+                const periodMatch = normalizePeriod(b.billing_period) === searchMonth;
+                
+                // Support filtering by Due Date Month as well (User intuition fix)
+                let dueDateMatch = false;
+                if (b.due_date) {
+                    const d = new Date(b.due_date);
+                    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                    const dueDateMonthStr = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+                    dueDateMatch = dueDateMonthStr === searchMonth;
+                }
+                
+                return periodMatch || dueDateMatch;
+            });
+        }
+
+        // Apply barangay filter (client-side, on customer address)
+        if (barangay) {
+            filteredData = filteredData.filter(b => {
+                const address = (b.customers?.address || '').toLowerCase();
+                return address.includes(barangay.toLowerCase());
+            });
         }
 
         // Populate Month Dropdown (normalized, deduplicated)
         const monthSelect = document.getElementById('billingMonthFilter');
         if (monthSelect && monthSelect.children.length <= 1) {
             const rawPeriods = data.map(b => b.billing_period).filter(Boolean);
-            const normalizedMap = {};
+            const normalizedSet = new Set();
+            
             rawPeriods.forEach(p => {
                 const key = normalizePeriod(p);
-                if (key && !normalizedMap[key]) {
-                    normalizedMap[key] = p; // map normalized display → raw value
-                }
+                if (key) normalizedSet.add(key);
             });
-            const sortedKeys = Object.keys(normalizedMap).sort((a, b) => {
+            
+            const sortedKeys = Array.from(normalizedSet).sort((a, b) => {
                 return new Date(b) - new Date(a);
             });
+            
             sortedKeys.forEach(display => {
                 const opt = document.createElement('option');
-                opt.value = normalizedMap[display];
+                opt.value = display; // Use normalized display as the value
                 opt.textContent = display;
                 monthSelect.appendChild(opt);
             });
         }
+
+        // Store for printing
+        window.lastBillingData = filteredData;
 
         if (filteredData.length === 0) {
             tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">No billing records found.</td></tr>';
@@ -610,23 +642,19 @@ async function loadBilling(filters = {}) {
                 if (diffDays >= cutoffGrace) {
                     cutoffWarning = `
                         <div class="balance-info-trigger" style="margin-left: 8px;">
-                            <i class="fas fa-exclamation-triangle text-danger" style="cursor: help; animation: pulse 2s infinite; font-size: 0.9rem;"></i>
-                            <div class="balance-tooltip" style="width: 200px;">
-                                <div class="tooltip-header" style="color: #ef4444; border-bottom-color: rgba(239, 68, 68, 0.2);">Disconnection Alert</div>
-                                <div class="tooltip-row">
-                                    <span>Urgency</span>
-                                    <span style="color: #ef4444; font-weight: 800;">CRITICAL</span>
+                            <i class="fas fa-exclamation-triangle text-danger" style="cursor: pointer; animation: pulse 2s infinite; font-size: 0.9rem;"></i>
+                            <div class="balance-tooltip" style="width: 180px;">
+                                <div class="tooltip-header" style="color: #ef4444; border-bottom-color: rgba(239, 68, 68, 0.2); margin-bottom: 0.5rem;">Disconnection Alert</div>
+                                <div class="tooltip-row" style="margin-bottom: 0.8rem;">
+                                    <span>Overdue</span>
+                                    <span style="color: #ef4444;">${diffDays} Days</span>
                                 </div>
-                                <div class="tooltip-row">
-                                    <span>Days Overdue</span>
-                                    <span>${diffDays} Days</span>
-                                </div>
-                                <div class="tooltip-row" style="font-size: 0.75rem; opacity: 0.8; white-space: normal; margin-top: 4px; line-height: 1.3;">
-                                    Account is eligible for cutoff due to overdue balance exceeding grace period.
-                                </div>
-                                <div class="tooltip-footer" style="color: #ef4444; border-top-color: rgba(239, 68, 68, 0.2);">
-                                    <span>STATUS</span>
-                                    <span>FOR CUTOFF</span>
+                                <div class="tooltip-footer" style="border-top: 1px solid rgba(239, 68, 68, 0.1); padding-top: 0.8rem;">
+                                    <button onclick="window.dbOperations.initiateCutoff('${customer.id}', '${customerName.replace(/'/g, "\\'")}')" 
+                                            class="btn-cutoff-enforce"
+                                            style="background: #ef4444; color: white; border: none; width: 100%; border-radius: 6px; padding: 0.6rem; font-size: 0.75rem; font-weight: 700; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 0.4rem; transition: all 0.2s; font-family: 'Inter', sans-serif;">
+                                        <i class="fas fa-power-off"></i> ENFORCE CUTOFF
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -634,17 +662,21 @@ async function loadBilling(filters = {}) {
                 }
             }
 
+            const isInactive = (customer?.status || '').toLowerCase() === 'inactive';
+
             return `
-            <tr data-id="${bill.id}" data-customer-id="${bill.customer_id}">
+            <tr class="${isInactive ? 'status-inactive' : ''}" data-id="${bill.id}" data-customer-id="${bill.customer_id}">
                 <td class="bill-id col-bill-id">#BIL-${String(bill.id).padStart(4, '0')}</td>
                 <td class="col-customer">
-                    <div class="customer-column">
-                        <span class="customer-name">${customerName}</span>
-                        <div class="customer-meta">
-                            <span class="account-id small">${getAccountID(customer?.id)}</span>
-                            <span class="meta-sep">•</span>
-                            <span class="barangay-mini">${getBarangay(customer?.address)}</span>
-                        </div>
+                        <div class="customer-column">
+                            <span class="customer-name">${customerName}</span>
+                            ${customer?.has_discount ? '<span class="discount-pill" title="Senior Citizen Discount Active">SC</span>' : ''}
+                            ${isInactive ? '<span class="badge-deactivated">DEACTIVATED</span>' : ''}
+                            <div class="customer-meta">
+                                <span class="customer-acc-id mono" style="color: var(--text-light); font-size: 0.75rem;">${getAccountID(customer?.id)}</span>
+                                <span class="meta-sep" style="opacity: 0.3; margin: 0 2px;">•</span>
+                                <span class="barangay-mini">${getBarangay(customer?.address)}</span>
+                            </div>
                     </div>
                 </td>
                 <td class="col-period">${normalizePeriod(bill.billing_period) || 'N/A'}</td>
@@ -656,6 +688,7 @@ async function loadBilling(filters = {}) {
                             ${bill.status.charAt(0).toUpperCase() + bill.status.slice(1)}
                         </span>
                         ${cutoffWarning}
+                        ${(isInactive && customer?.disconnection_bill_id === bill.id) ? '<span class="badge danger" style="font-size: 0.65rem; padding: 2px 6px;">DISCONNECTED ' + (customer?.disconnection_date ? new Date(customer.disconnection_date).toLocaleDateString() : '') + '</span>' : ''}
                     </div>
                 </td>
                 <td class="balance col-balance ${bill.balance > 0 ? 'negative' : 'positive'}">₱${parseFloat(bill.balance).toLocaleString()}</td>
@@ -729,11 +762,11 @@ async function loadDashboardStats() {
         };
 
         // Prepare Consumption Data for Line Chart (Group by billing month)
-        // Only show months for the current year (2026)
+        // Show months for the current year
         const labels = [];
         const consumptionByMonth = {};
         const now = new Date();
-        const currentYear = 2026; // Static as requested, or use now.getFullYear()
+        const currentYear = now.getFullYear(); 
 
         // Loop from January (0) to current month
         for (let m = 0; m <= now.getMonth(); m++) {
@@ -744,7 +777,7 @@ async function loadDashboardStats() {
         }
 
         allBills?.forEach(bill => {
-            const month = bill.billing_period;
+            const month = normalizePeriod(bill.billing_period);
             if (consumptionByMonth.hasOwnProperty(month)) {
                 consumptionByMonth[month] += parseFloat(bill.consumption) || 0;
             }
@@ -757,6 +790,12 @@ async function loadDashboardStats() {
             },
             status: statusData
         };
+
+        // Update chart subtitle year
+        const chartSubtitle = document.querySelector('.chart-subtitle');
+        if (chartSubtitle && chartSubtitle.textContent.includes('Year')) {
+            chartSubtitle.textContent = `Cubic Meter Usage (Year ${currentYear})`;
+        }
 
         // Update UI Stats
         const statValues = document.querySelectorAll('.stat-value');
@@ -804,39 +843,11 @@ async function loadDashboardStats() {
     }
 }
 
-function initializeRealtimeActivities() {
-    const tbody = document.getElementById('recentActivitiesBody');
-    if (!tbody) return;
+// Realtime for the dashboard is handled centrally in admin.js setupRealtimeSubscriptions()
 
-    // Listen to billing table updates (cash payments)
-    supabase
-        .channel('billing-activities')
-        .on('postgres_changes', {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'billing'
-        }, payload => handleRealtimeActivity(payload.new, 'insert'))
-        .on('postgres_changes', {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'billing'
-        }, payload => handleRealtimeActivity(payload.new, 'update'))
-        .subscribe();
-
-    /* 
-    // Listen to online_payments table updates (cashier verifications)
-    supabase
-        .channel('online-payment-verifications')
-        .on('postgres_changes', { 
-            event: 'UPDATE', 
-            schema: 'public', 
-            table: 'online_payments' 
-        }, payload => handleOnlinePaymentActivity(payload.new))
-        .subscribe();
-    */
-}
-
-async function handleRealtimeActivity(bill, type) {
+// === HELPER: HANDLE ONLINE PAYMENT (DISABLED) ===
+// This was removed as the online_payments table is no longer used.
+async function _handleRealtimeActivity_DISABLED(bill, type) {
     const tbody = document.getElementById('recentActivitiesBody');
     if (!tbody) return;
 
@@ -968,19 +979,19 @@ async function loadRecentActivities() {
     if (!tbody) return;
 
     try {
-        // 1. Fetch recent billing updates (cash payments)
-        const { data: billingActivities, error: billingError } = await supabase
+        // Fetch the 10 most recently created/updated meter readings
+        const { data: recentReadings, error: billingError } = await supabase
             .from('billing')
             .select(`
                 id,
-                amount,
+                previous_reading,
+                current_reading,
+                consumption,
+                reading_date,
                 updated_at,
-                status,
-                payment_date,
                 customer_id,
                 customers (first_name, last_name)
             `)
-            .eq('status', 'paid')
             .order('updated_at', { ascending: false })
             .limit(10);
 
@@ -989,99 +1000,26 @@ async function loadRecentActivities() {
             throw billingError;
         }
 
-        // 2. Online payment verifications are disabled as the table was removed
-        let onlineActivitiesWithCustomers = [];
-        /*
-        const { data: onlinePayments, error: onlineError } = await supabase
-            .from('online_payments')
-            .select('*')
-            .in('status', ['verified', 'rejected'])
-            .order('updated_at', { ascending: false })
-            .limit(10);
-
-        if (onlineError) {
-            console.error('[loadRecentActivities] Online Error:', onlineError);
-            throw onlineError;
-        }
-
-        if (onlinePayments && onlinePayments.length > 0) {
-            const customerIds = [...new Set(onlinePayments.map(p => p.customer_id))];
-            const { data: customers, error: customerError } = await supabase
-                .from('customers')
-                .select('id, first_name, last_name')
-                .in('id', customerIds);
-            
-            if (customerError) {
-                console.error('[loadRecentActivities] Customer Error:', customerError);
-            }
-
-            const customerMap = {};
-            (customers || []).forEach(c => customerMap[c.id] = c);
-            
-            onlineActivitiesWithCustomers = onlinePayments.map(payment => ({
-                ...payment,
-                customers: customerMap[payment.customer_id]
-            }));
-        }
-        */
-
-        // Helper to force UTC parsing for backend timestamps
-        const calculateTimestamp = (dateStr) => {
-            if (!dateStr) return new Date();
-            // If string has no timezone info (no Z or +), append Z to force UTC
-            if (typeof dateStr === 'string' && (dateStr.includes('T') || dateStr.includes(':')) &&
-                !dateStr.endsWith('Z') && !dateStr.includes('+')) {
-                return new Date(dateStr + 'Z');
-            }
-            return new Date(dateStr);
-        };
-
-        // 4. Combine and sort all activities
-        const allActivities = [
-            ...(billingActivities || []).map(act => ({
-                ...act,
-                type: 'cash_payment',
-                timestamp: calculateTimestamp(act.updated_at || act.payment_date)
-            })),
-            ...(onlineActivitiesWithCustomers || [])
-        ].sort((a, b) => b.timestamp - a.timestamp).slice(0, 5);
-
-
-        if (allActivities.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: #9E9E9E;">No recent collection activities</td></tr>';
+        if (!recentReadings || recentReadings.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 2rem; color: #9E9E9E;">No recent readings recorded</td></tr>';
             return;
         }
 
-        tbody.innerHTML = allActivities.map(act => {
+        tbody.innerHTML = recentReadings.map(act => {
             const customer = act.customers;
             const name = customer ? `${customer.first_name} ${customer.last_name}` : 'Unknown';
-            const date = formatLocalDateTime(act.timestamp);
-
-            let action = '';
-            let actionClass = '';
-
-            if (act.type === 'cash_payment') {
-                action = 'Cash Collection';
-                actionClass = 'success';
-            } else if (act.type === 'online_verification') {
-                if (act.status === 'verified') {
-                    action = `${act.platform.toUpperCase()} Verified`;
-                    actionClass = 'success';
-                } else {
-                    action = `${act.platform.toUpperCase()} Rejected`;
-                    actionClass = 'danger';
-                }
-            }
+            const date = formatLocalDateTime(act.updated_at || act.reading_date, true);
+            
+            // Usage highlighting
+            const usage = parseFloat(act.consumption || 0);
+            const usageClass = usage > 50 ? 'text-warning bold' : '';
 
             return `
                 <tr>
-                    <td>
-                        <div class="activity-name">${name}</div>
-                    </td>
-                    <td>
-                        <span class="badge ${actionClass}">${action}</span>
-                    </td>
-                    <td class="activity-amount">₱${parseFloat(act.amount).toLocaleString()}</td>
+                    <td><strong>${name}</strong></td>
+                    <td style="text-align: right;">${act.previous_reading || 0}</td>
+                    <td style="text-align: right;">${act.current_reading || 0}</td>
+                    <td style="text-align: right;" class="${usageClass}">${usage} cu.m.</td>
                     <td class="activity-date">${date}</td>
                 </tr>
             `;
@@ -1089,7 +1027,7 @@ async function loadRecentActivities() {
 
     } catch (error) {
         console.error('❌ [loadRecentActivities] Failed:', error);
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #D32F2F;">Failed to load activities.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-danger center">Failed to load recent activity</td></tr>';
     }
 }
 
@@ -1104,16 +1042,13 @@ window.PREMIUM_PALETTE = [
 
 window.PULUPANDAN_BARANGAYS = [
     'Zone 1', 'Zone 1-A', 'Zone 2', 'Zone 3', 'Zone 4', 'Zone 4-A',
-    'Zone 5', 'Zone 6', 'Zone 7', 'Canjusa', 'Utod', 'Pag-ayon',
-    'Palaka Norte', 'Palaka Sur', 'Mabini', 'Tapong', 'Crossing', 'Ubay', 'Poblacion'
+    'Zone 5', 'Zone 6', 'Zone 7', 'Canjusa', 'Crossing Pulupandan',
+    'Culo', 'Mabini', 'Pag-ayon', 'Palaka Norte', 'Palaka Sur',
+    'Patic', 'Tapong', 'Ubay', 'Utod', 'Poblacion'
 ];
 
 // === AREA BOXES (SCHEDULING OVERHAUL) ===
-const PULUPANDAN_BARANGAYS_LOCAL = [ // Renamed to avoid conflict with global
-    'Zone 1', 'Zone 1-A', 'Zone 2', 'Zone 3', 'Zone 4', 'Zone 4-A', 'Zone 5', 'Zone 6', 'Zone 7',
-    'Canjusa', 'Crossing Pulupandan', 'Culo', 'Mabini', 'Pag-ayon', 'Palaka Norte', 'Palaka Sur',
-    'Patic', 'Tapong', 'Ubay', 'Utod'
-];
+// Use window.PULUPANDAN_BARANGAYS as the single source of truth for barangay lists.
 
 async function loadAreaBoxes() {
     const grid = document.getElementById('assignmentsGrid');
@@ -1340,8 +1275,56 @@ async function updateSystemSettings(settingsData) {
             });
             throw error;
         }
+        if (error) throw error;
+        showNotification('System settings updated', 'success');
+        
+        // Recalculate ALL unpaid bills to reflect new rates/discounts
+        console.log('[updateSystemSettings] Triggering global recalculation...');
+        await recalculateUnpaidBills();
+
+        return true;
     } catch (error) {
         console.error('Error updating system settings:', error);
+        showNotification('Failed to update settings', 'error');
+        throw error;
+    }
+}
+
+async function loadRateSchedules() {
+    try {
+        const { data, error } = await supabase
+            .from('rate_schedules')
+            .select('*')
+            .order('display_name');
+
+        if (error) throw error;
+        return data;
+    } catch (error) {
+        console.error('Error loading rate schedules:', error);
+        throw error;
+    }
+}
+
+async function updateRateSchedule(id, rateData) {
+    try {
+        const { error } = await supabase
+            .from('rate_schedules')
+            .update({
+                ...rateData,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id);
+
+        if (error) throw error;
+        showNotification('Rate schedule updated', 'success');
+        
+        // Recalculate ALL unpaid bills because a category rate changed
+        console.log('[updateRateSchedule] Triggering global recalculation...');
+        await recalculateUnpaidBills();
+
+        return true;
+    } catch (error) {
+        console.error('Error updating rate schedule:', error);
         throw error;
     }
 }
@@ -1443,6 +1426,7 @@ async function updateAdminPIN(newPIN, currentPIN) {
 async function loadMasterLedger(options = {}) {
     const barangay = options.barangay || '';
     const search = options.search || '';
+    const period = options.period || '';
 
     const tbody = document.getElementById('ledgerMasterBody');
     if (!tbody) return;
@@ -1483,11 +1467,19 @@ async function loadMasterLedger(options = {}) {
             return b.id - a.id;
         });
 
-        // 2. Fetch ALL Unpaid Bills to calculate balances
-        const { data: unpaidBills, error: bError } = await supabase
+        // 2. Fetch bills: if period filter is active, fetch only that period's bills;
+        //    otherwise fetch all unpaid to calculate outstanding balances.
+        let billQuery = supabase
             .from('billing')
-            .select('customer_id, amount')
-            .eq('status', 'unpaid');
+            .select('customer_id, amount, billing_period, due_date, status');
+
+        // Note: We fetch all relevant bills and filter client-side to handle normalization
+        // and due date matching consistently with the main billing list.
+        if (!period) {
+            billQuery = billQuery.eq('status', 'unpaid');
+        }
+
+        const { data: unpaidBills, error: bError } = await billQuery;
 
         if (bError) throw bError;
 
@@ -1498,8 +1490,8 @@ async function loadMasterLedger(options = {}) {
             balanceMap[cid] = (balanceMap[cid] || 0) + parseFloat(bill.amount);
         });
 
-        // 3. Apply client-side filters for barangay and search
-        const filtered = customers.filter(c => {
+        // 3. Apply client-side filters for barangay, search and period
+        let filtered = customers.filter(c => {
             const address = c.address || '';
             const matchesBarangay = !barangay || address.toLowerCase().includes(barangay.toLowerCase());
 
@@ -1513,7 +1505,26 @@ async function loadMasterLedger(options = {}) {
                 accountId.includes(lowSearch) ||
                 meterNo.includes(lowSearch);
 
-            return matchesBarangay && matchesSearch;
+            // When a period is selected, only show customers who have a matching bill in that period
+            // (Using normalized matching for period or due date month)
+            const matchesPeriod = !period || unpaidBills.some(b => {
+                if (b.customer_id !== c.id) return false;
+                
+                const searchMonth = normalizePeriod(period);
+                const periodMatch = normalizePeriod(b.billing_period) === searchMonth;
+                
+                let dueDateMatch = false;
+                if (b.due_date) {
+                    const d = new Date(b.due_date);
+                    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                    const dueDateMonthStr = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+                    dueDateMatch = dueDateMonthStr === searchMonth;
+                }
+                
+                return periodMatch || dueDateMatch;
+            });
+
+            return matchesBarangay && matchesSearch && matchesPeriod;
         });
 
         if (filtered.length === 0) {
@@ -1523,13 +1534,24 @@ async function loadMasterLedger(options = {}) {
 
         tbody.innerHTML = filtered.map(c => {
             const balance = balanceMap[c.id] || 0;
+            const isInactive = (c.status || '').toLowerCase() === 'inactive';
+            
+            // Type color logic
+            const type = (c.customer_type || '').toLowerCase();
+            let typeColor = '#0288D1'; // Default Blue (Residential)
+            if (type === 'commercial-a') typeColor = '#43A047'; // Green
+            else if (type === 'commercial-b') typeColor = '#FB8C00'; // Orange
+            else if (type === 'commercial-c') typeColor = '#06B6D4'; // Cyan
+            else if (type === 'full-commercial' || type.includes('industrial')) typeColor = '#E53935'; // Red
+            else if (type === 'bulk') typeColor = '#8B5CF6'; // Purple
+
             return `
-            <tr>
+            <tr class="${isInactive ? 'status-inactive' : ''}">
                 <td><span class="mono">${getAccountID(c.id)}</span></td>
-                <td><strong>${c.last_name}, ${c.first_name}</strong></td>
+                <td><strong>${c.last_name}, ${c.first_name}</strong>${isInactive ? ' <span class="badge-deactivated">DEACTIVATED</span>' : ''}${c.has_discount ? ' <span class="badge-discount" title="Senior Citizen Discount Active">SENIOR</span>' : ''}</td>
                 <td>${getBarangay(c.address)}</td>
                 <td>${c.meter_number || '--'}</td>
-                <td>${c.customer_type || 'Residential'}</td>
+                <td><span class="badge secondary" style="font-size: 0.72rem; background: ${typeColor}15; color: ${typeColor}; padding: 3px 8px; border-radius: 6px; font-weight: 600; border: 1px solid ${typeColor}30; letter-spacing: 0.02em;">${c.customer_type ? c.customer_type.replace(/-/g, ' ').toUpperCase() : 'RESIDENTIAL'}</span></td>
                 <td class="${balance > 0 ? 'text-danger fw-bold' : 'text-success'}">
                     ₱${balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </td>
@@ -1573,6 +1595,30 @@ async function loadLedgerCard(customerId) {
         if (document.getElementById('cardCustomerName')) document.getElementById('cardCustomerName').textContent = name;
         if (document.getElementById('cardAddress')) document.getElementById('cardAddress').textContent = customer.address;
         if (document.getElementById('cardMeterNo')) document.getElementById('cardMeterNo').textContent = customer.meter_number;
+
+        // Show Deactivated Banner if needed
+        const bannerContainer = document.getElementById('ledgerBannerContainer');
+        if (bannerContainer) {
+            const isInactive = (customer.status || '').toLowerCase() === 'inactive';
+            if (isInactive) {
+                const disconnDate = customer.disconnection_date ? new Date(customer.disconnection_date).toLocaleDateString() : null;
+                const disconnBill = customer.disconnection_bill_id ? `BIL-${customer.disconnection_bill_id}` : null;
+                const disconnInfo = disconnDate ? `<div style="font-weight: 400; font-size: 0.75rem; opacity: 0.9;">Disconnected on: ${disconnDate}${disconnBill ? ' | Bill: ' + disconnBill : ''}</div>` : '';
+                bannerContainer.innerHTML = `
+                    <div class="deactivated-banner">
+                        <i class="fas fa-exclamation-triangle fa-lg"></i>
+                        <div>
+                            <div style="font-size: 1rem;">ACCOUNT DEACTIVATED</div>
+                            <div style="font-weight: 400; font-size: 0.75rem; opacity: 0.9;">This account has been cutoff. Service is currently suspended.</div>
+                            ${disconnInfo}
+                        </div>
+                    </div>
+                `;
+                bannerContainer.style.display = 'block';
+            } else {
+                bannerContainer.style.display = 'none';
+            }
+        }
 
         // 2. Fetch Billing History
         const { data: bills, error: bError } = await supabase
@@ -1621,6 +1667,23 @@ async function loadLedgerCard(customerId) {
             }
         });
 
+        // Add Disconnection Event if customer was deactivated
+        if (customer.disconnection_date) {
+            const disconnBillId = customer.disconnection_bill_id || '--';
+            entries.push({
+                date: customer.disconnection_date,
+                billNo: `BIL-${disconnBillId}`,
+                others: '',
+                particulars: 'Disconnection',
+                reading: null,
+                consumption: null,
+                billing: null,
+                collection: null,
+                balance: runningBalance,
+                type: 'disconnection'
+            });
+        }
+
         // Sort by date
         entries.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -1630,7 +1693,7 @@ async function loadLedgerCard(customerId) {
         }
 
         tbody.innerHTML = entries.map(e => `
-            <tr class="${e.type === 'payment' ? 'payment-row' : 'bill-row'}">
+            <tr class="${e.type === 'payment' ? 'payment-row' : (e.type === 'disconnection' ? 'disconnection-row' : 'bill-row')}">
                 <td>${formatLocalDateTime(e.date, false)}</td>
                 <td>${e.billNo}</td>
                 <td>${e.others}</td>
@@ -1651,90 +1714,121 @@ async function loadLedgerCard(customerId) {
 
 /**
  * Loads the meter reading list for a specific period and barangay
+ * NOW: Refactored to be Customer-centric for continuous reading
+ */
+/**
+ * Loads the meter reading list for a specific period and barangay
+ * NOW: Bill-centric (shows only readed customers) with Latest-First sorting
  */
 async function loadReadingList(options = {}) {
-    const { period = '', barangay = '', search = '', sortBy = 'id', sortOrder = 'asc' } = options;
+    const { period = '', barangay = '', search = '', sortBy = 'updated_at', sortOrder = 'desc' } = options;
 
     const tbody = document.getElementById('readingListTableBody');
     if (!tbody) return;
 
     try {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 3rem; color: #9E9E9E;"><i class="fas fa-spinner fa-spin"></i> Loading readings...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 3rem; color: #9E9E9E;"><i class="fas fa-spinner fa-spin"></i> Loading readings...</td></tr>';
 
-        // 1. Single efficient query with join and server-side filtering
+        // 1. Fetch Billings primarily
         let query = supabase
             .from('billing')
             .select(`
-                customer_id, 
-                previous_reading, 
-                current_reading, 
-                consumption, 
-                billing_period, 
-                updated_at,
+                *,
                 customers!inner (
-                    id, last_name, first_name, middle_initial, address, meter_number
+                    id, last_name, first_name, middle_initial, address, meter_number, has_discount
                 )
-            `)
-            .limit(200); // Reasonable limit for performance
+            `);
 
-        // 2. Database-level filters
-        if (period) {
-            query = query.eq('billing_period', period);
-        }
-
+        // Apply filters
         if (barangay) {
             query = query.ilike('customers.address', `%${barangay}%`);
         }
 
         if (search) {
-            // Using a single search string across multiple fields via server-side 'or'
             const searchPattern = `%${search}%`;
-            query = query.or(`first_name.ilike.${searchPattern},last_name.ilike.${searchPattern},meter_number.ilike.${searchPattern}`, { foreignTable: 'customers' });
+            query = query.or(`customers.first_name.ilike.${searchPattern},customers.last_name.ilike.${searchPattern},customers.meter_number.ilike.${searchPattern}`);
         }
 
-        // 3. Sorting (Handle joined fields)
-        if (sortBy === 'updated_at' || sortBy === 'id') {
-            query = query.order(sortBy, { ascending: sortOrder === 'asc' });
-        } else if (sortBy === 'last_name') {
-            query = query.order('last_name', { foreignTable: 'customers', ascending: sortOrder === 'asc' });
-        }
+        const { data: bills, error: bError } = await query;
+        if (bError) throw bError;
 
-        const { data: listData, error } = await query;
-        if (error) throw error;
-
-        if (listData.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 3rem; color: #9E9E9E;">No results found reflecting your filters.</td></tr>`;
+        if (!bills || bills.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 3rem; color: #9E9E9E;">No readings found matching filters.</td></tr>`;
             return;
         }
 
-        tbody.innerHTML = listData.map(item => {
-            // Handle both object and array results from the join
-            const rawCustomer = item.customers;
-            const customer = (Array.isArray(rawCustomer) ? rawCustomer[0] : rawCustomer) || {};
+        // 2. Client-side period normalization and filtering
+        const searchMonth = period ? normalizePeriod(period) : null;
+        let filteredBills = bills;
+        
+        if (searchMonth) {
+            filteredBills = bills.filter(b => normalizePeriod(b.billing_period) === searchMonth);
+        }
 
-            const lastName = customer.last_name || 'N/A';
-            const firstName = customer.first_name || '';
-            const middleInitial = customer.middle_initial ? ` ${customer.middle_initial}.` : '';
-            const fullName = `${lastName}${firstName ? ', ' + firstName : ''}${middleInitial}`;
-            const dateRead = item.updated_at ? formatLocalDateTime(item.updated_at) : '--';
+        // 3. Map for display
+        const renderedList = filteredBills.map(b => {
+            const c = b.customers;
+            const fullName = `${c.last_name}, ${c.first_name}${c.middle_initial ? ' ' + c.middle_initial + '.' : ''}`;
+            const dateRead = formatLocalDateTime(b.updated_at || b.reading_date, true);
+            
+            return {
+                billNo: b.bill_no,
+                billingId: b.id,
+                customerId: c.id,
+                fullName: fullName,
+                meterNo: c.meter_number,
+                address: c.address,
+                prev: b.previous_reading || 0,
+                curr: b.current_reading || 0,
+                usage: b.consumption || 0,
+                date: dateRead,
+                barangay: getBarangay(c.address),
+                updated_at: b.updated_at || b.created_at || b.reading_date
+            };
+        });
 
-            return `
+        // 4. Client-side Sort
+        renderedList.sort((a, b) => {
+            let valA, valB;
+            if (sortBy === 'fullName') {
+                valA = a.fullName.toLowerCase();
+                valB = b.fullName.toLowerCase();
+            } else if (sortBy === 'updated_at') {
+                valA = new Date(a.updated_at).getTime();
+                valB = new Date(b.updated_at).getTime();
+            } else {
+                valA = a[sortBy] || 0;
+                valB = b[sortBy] || 0;
+            }
+            
+            if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+            if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        tbody.innerHTML = renderedList.map(item => `
             <tr>
-                <td class="mono">${getAccountID(customer.id || '')}</td>
-                <td><strong>${fullName}</strong></td>
-                <td style="text-align: right;">${item.previous_reading || '--'}</td>
-                <td style="text-align: right;">${item.current_reading || '--'}</td>
-                <td style="text-align: right;">${item.consumption || '--'}</td>
-                <td>${customer.address}</td>
-                <td class="activity-date">${dateRead}</td>
-                <td class="mono">${customer.meter_number || '--'}</td>
+                <td class="mono">${getAccountID(item.customerId)}</td>
+                <td><strong>${item.fullName}</strong></td>
+                <td style="text-align: right;">${item.prev}</td>
+                <td style="text-align: right;">${item.curr}</td>
+                <td style="text-align: right;">${item.usage}</td>
+                <td><div class="barangay-display" title="${item.address}">${item.barangay}</div></td>
+                <td class="activity-date">${item.date}</td>
+                <td class="mono">${item.meterNo || '--'}</td>
+                <td>
+                    <button class="btn-icon" title="Edit Reading" 
+                            onclick="window.editReading('${item.billingId}', ${item.prev}, '${item.curr}', '${item.fullName.replace(/'/g, "\\'")}', '${item.meterNo}', ${item.customerId})">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <span class="mono" style="font-size: 0.75rem; color: #9E9E9E; display: block; margin-top: 4px;">#${String(item.billNo || item.billingId).padStart(4, '0')}</span>
+                </td>
             </tr>
-            `;
-        }).join('');
+        `).join('');
 
     } catch (error) {
         console.error('Error loading reading list:', error);
-        tbody.innerHTML = `<tr><td colspan="8" class="text-danger center">Failed to load reading list: ${error.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-danger center">Failed to load reading list: ${error.message}</td></tr>`;
     }
 }
 
@@ -1772,6 +1866,17 @@ async function getReaderForBarangay(barangay) {
         console.error('Error getting reader for barangay:', error);
         return 'Error fetching reader';
     }
+}
+
+/**
+ * Extracts barangay name from address string
+ */
+function getBarangay(address) {
+    if (!address) return 'N/A';
+    // Match common formats: "Street, Barangay, City" or "Barangay, City"
+    const parts = address.split(',').map(p => p.trim());
+    if (parts.length >= 2) return parts[parts.length - 2];
+    return parts[0] || 'N/A';
 }
 
 // === DASHBOARD WIDGET: RECENT READINGS ===
@@ -1817,7 +1922,7 @@ async function loadRecentReadingsWidget() {
                 <td style="text-align: right;">${r.previous_reading}</td>
                 <td style="text-align: right; font-weight: 600; color: var(--primary);">${r.current_reading}</td>
                 <td style="text-align: right;">
-                    <span class="badge secondary">${usage} m³</span>
+                    <span class="badge secondary">${usage} cu.m.</span>
                 </td>
                 <td class="activity-date">${date}</td>
             </tr>
@@ -1834,42 +1939,224 @@ async function loadRecentReadingsWidget() {
 let isRealtimeReadingsInitialized = false;
 let dashboardReadingsChannel = null;
 
-function initializeRealtimeReadingsWidget() {
-    if (isRealtimeReadingsInitialized) return;
+// Readings Realtime is now handled centrally in admin.js setupRealtimeSubscriptions()
+// to avoid redundant billing table listeners.
 
-    const tbody = document.getElementById('recentActivitiesBody');
-    if (!tbody) return;
+// === CUTOFF LOGIC ===
+let currentCutoffCustomerId = null;
+
+async function initiateCutoff(customerId, customerName) {
+    currentCutoffCustomerId = customerId;
+    const nameSpan = document.getElementById('cutoffCustomerName');
+    if (nameSpan) nameSpan.textContent = customerName;
+    
+    if (typeof openModal === 'function') {
+        openModal('cutoffConfirmModal');
+    } else {
+        const modal = document.getElementById('cutoffConfirmModal');
+        if (modal) modal.style.display = 'flex';
+    }
+}
+
+async function confirmCutoff() {
+    if (!currentCutoffCustomerId) return;
+    
+    const btn = document.getElementById('confirmCutoffBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+    btn.disabled = true;
 
     try {
-        isRealtimeReadingsInitialized = true;
+        // Find the most recent overdue bill for this customer to link the disconnection
+        const { data: overdueBills } = await supabase
+            .from('billing')
+            .select('id')
+            .eq('customer_id', Number(currentCutoffCustomerId))
+            .in('status', ['overdue', 'unpaid'])
+            .order('due_date', { ascending: false })
+            .limit(1);
 
-        dashboardReadingsChannel = supabase
-            .channel('dashboard-readings-feed')
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'billing'
-            }, () => {
-                loadRecentReadingsWidget();
-                loadDashboardStats();
+        const disconnBillId = overdueBills?.[0]?.id || null;
+
+        const { error } = await supabase
+            .from('customers')
+            .update({
+                status: 'inactive',
+                disconnection_date: new Date().toISOString(),
+                disconnection_bill_id: disconnBillId
             })
-            .on('postgres_changes', {
-                event: 'UPDATE',
-                schema: 'public',
-                table: 'billing'
-            }, () => {
-                loadRecentReadingsWidget();
-                loadDashboardStats();
-            })
-            .subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    console.log('[Realtime] Dashboard readings widget listener connected');
-                }
-            });
+            .eq('id', Number(currentCutoffCustomerId));
+
+        if (error) throw error;
+
+        showNotification('Customer account deactivated for cutoff.', 'success');
+        
+        if (typeof closeModal === 'function') {
+            closeModal('cutoffConfirmModal');
+        } else {
+            const modal = document.getElementById('cutoffConfirmModal');
+            if (modal) modal.style.display = 'none';
+        }
+        
+        // Let realtime handle the refresh, but force a UI update if needed
+        if (typeof refreshBilling === 'function') refreshBilling();
 
     } catch (error) {
-        console.error('[Realtime] Error initializing readings widget:', error);
-        isRealtimeReadingsInitialized = false;
+        console.error('Error enforcing cutoff:', error);
+        showNotification('Failed to enforce cutoff: ' + error.message, 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+        currentCutoffCustomerId = null;
+    }
+}
+
+/**
+ * Updates a reading and recalculates the bill
+ * NOW: Supports- [x] Fix TypeError in `editReading` (Missing hidden inputs in `dashboard.html`)
+- [x] Fix Data Persistence in `updateReading` (Refactor to update all billing fields)
+- [x] Address 409 Conflict in `addCustomer` (Duplicate meter number check)
+- [x] Ensure Dashboard "Recent Meter Readings" shows readings, not collections
+- [x] Correct Reading List sorting (Latest updated/read first)
+- [x] Implement Sequential/Continuous Bill Numbering (`bill_no` column + RPC update)
+- [x] Fix Mobile App Sync History (Added `id` and `bill_no` to local storage)
+- [x] Fix missing `getBarangay` utility in `database.js`
+ */
+async function updateReading(billingId, newCurrentReading, customerId, targetPeriod) {
+    try {
+        console.log('[updateReading] Starting:', { billingId, newCurrentReading, customerId, targetPeriod });
+        
+        let bill = null;
+        let customer = null;
+        let prevReading = 0;
+
+        // 1. Resolve Data Source
+        const isUpdate = (billingId && billingId !== 'null' && billingId !== 'undefined' && billingId !== '');
+        
+        if (isUpdate) {
+            // Updating existing record
+            const { data, error: fetchError } = await supabase
+                .from('billing')
+                .select('*, customers!inner (*)')
+                .eq('id', billingId)
+                .single();
+            if (fetchError) {
+                console.error('[updateReading] Fetch Error:', fetchError);
+                throw fetchError;
+            }
+            bill = data;
+            customer = data.customers;
+            prevReading = bill.previous_reading || 0;
+            console.log('[updateReading] Found existing bill:', bill);
+        } else {
+            // Creating new month record
+            console.log('[updateReading] Creating NEW record for customer:', customerId);
+            if (!customerId || !targetPeriod) throw new Error("Missing Customer or Period for new reading.");
+            
+            const { data: cData, error: cError } = await supabase
+                .from('customers')
+                .select('*')
+                .eq('id', customerId)
+                .single();
+            if (cError) throw cError;
+            customer = cData;
+
+            // Fetch latest bill to get the previous reading
+            const { data: latestBills, error: lbError } = await supabase
+                .from('billing')
+                .select('current_reading')
+                .eq('customer_id', customerId)
+                .order('reading_date', { ascending: false })
+                .limit(1);
+            
+            if (!lbError && latestBills && latestBills.length > 0) {
+                prevReading = latestBills[0].current_reading || 0;
+            }
+            console.log('[updateReading] New record previous reading:', prevReading);
+        }
+
+        // 2. Load settings and rate schedules
+        const settings = await loadSystemSettings();
+        const schedules = await loadRateSchedules();
+        
+        // Match schedule using lowercase for robustness
+        const customerType = (customer.customer_type || 'residential').toLowerCase();
+        const schedule = schedules.find(s => (s.category_key || '').toLowerCase() === customerType) || null;
+
+        // 3. Calculation
+        const newConsumption = Math.max(0, newCurrentReading - prevReading);
+        const billToCalc = {
+            ...(bill || {}),
+            previous_reading: prevReading,
+            current_reading: newCurrentReading,
+            consumption: newConsumption,
+            billing_period: targetPeriod || (bill ? bill.billing_period : '')
+        };
+
+        const result = window.BillingEngine.calculate(billToCalc, customer, settings, schedule);
+        console.log('[updateReading] Calculation result:', result);
+
+        // 4. Persistence
+        const updateData = {
+            current_reading: newCurrentReading,
+            consumption: newConsumption,
+            base_charge: parseFloat((result.baseRate || 0).toFixed(2)),
+            consumption_charge: parseFloat((result.consumptionCharge || 0).toFixed(2)),
+            penalty: parseFloat((result.penalty || 0).toFixed(2)),
+            arrears: parseFloat((result.arrears || 0).toFixed(2)),
+            amount: parseFloat((result.totalDue || 0).toFixed(2)),
+            // Only update balance if it's currently unpaid or new. 
+            // If it's paid, keep balance 0 unless we want to void payment.
+            updated_at: new Date().toISOString()
+        };
+
+        if (!bill || bill.status === 'unpaid' || bill.status === 'overdue') {
+            updateData.balance = parseFloat((result.totalDue || 0).toFixed(2));
+        }
+
+        console.log('[updateReading] Persistence data:', updateData);
+
+        if (isUpdate) {
+            // UPDATE
+            const { error: updateError } = await supabase
+                .from('billing')
+                .update(updateData)
+                .eq('id', billingId);
+            
+            if (updateError) {
+                console.error('[updateReading] Update Error:', updateError);
+                throw updateError;
+            }
+            console.log('[updateReading] Update SUCCESS');
+        } else {
+            // INSERT (New sequential bill)
+            const today = new Date();
+            const dueDate = new Date();
+            dueDate.setDate(dueDate.getDate() + (settings.overdue_days || 14));
+
+            const { error: insertError } = await supabase
+                .from('billing')
+                .insert([{
+                    ...updateData,
+                    customer_id: customerId,
+                    billing_period: targetPeriod,
+                    previous_reading: prevReading,
+                    status: 'unpaid',
+                    reading_date: today.toISOString(),
+                    due_date: dueDate.toISOString(),
+                    period_start: today.toISOString(),
+                    period_end: today.toISOString(),
+                    created_at: today.toISOString()
+                }]);
+            if (insertError) throw insertError;
+        }
+        
+        showNotification(billingId ? 'Bill updated' : 'New bill generated', 'success');
+        return true;
+    } catch (error) {
+        console.error('Error updating/generating reading:', error);
+        showNotification(error.message, 'error');
+        throw error;
     }
 }
 
@@ -1894,6 +2181,8 @@ window.dbOperations = {
     editAreaBox,
     loadSystemSettings,
     updateSystemSettings,
+    loadRateSchedules,
+    updateRateSchedule,
     verifyAdminPIN,
     updateAdminPIN,
     loadMasterLedger,
@@ -1901,7 +2190,139 @@ window.dbOperations = {
     loadReadingList,
     getReaderForBarangay,
     loadRecentReadingsWidget,
-    initializeRealtimeReadingsWidget,
-    initializeRealtimeActivities,
+    initiateCutoff,
+    confirmCutoff,
+    updateReading,
+    recalculateUnpaidBills,
     PULUPANDAN_BARANGAYS
 };
+
+/**
+ * Recalculates unpaid bills based on current settings and customer status.
+ *
+ * @param {number|null} targetCustomerId - Limit recalculation to one customer.
+ * @param {boolean} currentMonthOnly     - When true (default), only touches bills
+ *   from the current calendar month so past arrears stay untouched.
+ *   Pass false when editing a specific customer (discount toggle) to recalculate
+ *   all their pending bills regardless of period.
+ */
+async function recalculateUnpaidBills(targetCustomerId = null, currentMonthOnly = true) {
+    try {
+        console.log('[recalculateUnpaidBills] Starting...', { targetCustomerId, currentMonthOnly });
+
+        // 1. Determine current month window
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+        const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+        // 2. Fetch dependencies once
+        const settings  = await loadSystemSettings();
+        const schedules = await loadRateSchedules();
+
+        // 3. Build query
+        let query = supabase
+            .from('billing')
+            .select('*, customers!inner(*)')
+            .in('status', ['unpaid', 'overdue']);
+
+        // Scope to current month (by reading_date or created_at) unless targeting a specific customer
+        if (currentMonthOnly && !targetCustomerId) {
+            query = query
+                .gte('reading_date', monthStart)
+                .lte('reading_date', monthEnd);
+        }
+
+        if (targetCustomerId) {
+            query = query.eq('customer_id', targetCustomerId);
+        }
+
+        const { data: bills, error: fetchError } = await query;
+        if (fetchError) throw fetchError;
+
+        if (!bills || bills.length === 0) {
+            console.log('[recalculateUnpaidBills] No current-month bills to recalculate.');
+            // Still refresh the UI so tables are in sync
+            _liveRefreshBillingUI();
+            return;
+        }
+
+        console.log(`[recalculateUnpaidBills] Recalculating ${bills.length} bill(s)...`);
+
+        // 4. Build batch updates
+        const updates = [];
+        for (const bill of bills) {
+            const customer    = bill.customers;
+            const customerType = (customer.customer_type || 'residential').toLowerCase();
+            const schedule    = schedules.find(s => (s.category_key || '').toLowerCase() === customerType) || null;
+
+            const billToCalc = {
+                ...bill,
+                previous_reading: bill.previous_reading ?? 0,
+                current_reading:  bill.current_reading  ?? 0,
+                consumption:      bill.consumption       ?? 0
+            };
+
+            const result = window.BillingEngine.calculate(billToCalc, customer, settings, schedule);
+
+            updates.push(
+                supabase.from('billing').update({
+                    base_charge:         parseFloat((result.baseRate          || 0).toFixed(2)),
+                    consumption_charge:  parseFloat((result.consumptionCharge || 0).toFixed(2)),
+                    penalty:             parseFloat((result.penalty            || 0).toFixed(2)),
+                    arrears:             parseFloat((result.arrears            || 0).toFixed(2)),
+                    amount:              parseFloat((result.totalDue           || 0).toFixed(2)),
+                    balance:             parseFloat((result.totalDue           || 0).toFixed(2)),
+                    updated_at:          new Date().toISOString()
+                }).eq('id', bill.id)
+            );
+        }
+
+        // 5. Execute batch
+        const results = await Promise.all(updates);
+        const errors  = results.filter(r => r.error);
+        if (errors.length > 0) {
+            console.error('[recalculateUnpaidBills] Some updates failed:', errors);
+        }
+
+        console.log('[recalculateUnpaidBills] Done.');
+
+        // 6. Live-refresh all visible billing tables immediately
+        _liveRefreshBillingUI();
+
+    } catch (error) {
+        console.error('[recalculateUnpaidBills] CRITICAL ERROR:', error);
+        showNotification('Recalculation error: ' + error.message, 'error');
+    }
+}
+
+/**
+ * Triggers an in-place refresh of every billing-related table that is currently
+ * rendered on screen — no page reload required.
+ */
+function _liveRefreshBillingUI() {
+    // refreshBilling is exposed on window by admin.js
+    if (typeof window.refreshBilling === 'function') {
+        window.refreshBilling();
+    } else if (window.dbOperations?.loadBilling) {
+        window.dbOperations.loadBilling();
+    }
+
+    // Master Ledger (customer directory with balances)
+    if (window.dbOperations?.loadMasterLedger) {
+        const barangay = document.getElementById('ledgerBarangayFilter')?.value || '';
+        const period   = document.getElementById('ledgerPeriodFilter')?.value   || '';
+        const search   = document.getElementById('ledgerSearchInput')?.value    || '';
+        window.dbOperations.loadMasterLedger({ barangay, period, search });
+    }
+
+    // Dashboard stats and chart
+    if (window.dbOperations?.loadDashboardStats) {
+        window.dbOperations.loadDashboardStats();
+    }
+
+    // Reading list (if that tab is open)
+    if (typeof window.updateReadingList === 'function') {
+        window.updateReadingList();
+    }
+}
+

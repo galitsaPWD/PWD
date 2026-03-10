@@ -21,66 +21,47 @@
         }
     }
 
+    async function loadRateSchedules() {
+        try {
+            const { data, error } = await supabase
+                .from('rate_schedules')
+                .select('*')
+                .order('id');
+            if (error) throw error;
+            return data;
+        } catch (error) {
+            console.error('Error loading rate schedules for cashier:', error);
+            throw error;
+        }
+    }
+
     async function generateBillFromReading(customerId, currentReading, prevReading, readingDate) {
         try {
-            const settings = await loadSystemSettings();
-            const consumption = Math.max(0, currentReading - prevReading);
-            
-            // 1. Calculate Consumption Charge
-            let consumptionCharge = 0;
-            const t1T = settings.tier1_threshold || 10;
-            const t1R = settings.tier1_rate || 15;
-            const t2T = settings.tier2_threshold || 20;
-            const t2R = settings.tier2_rate || 20;
-            const t3R = settings.tier3_rate || 25;
+            const [settings, schedules] = await Promise.all([
+                loadSystemSettings(),
+                loadRateSchedules()
+            ]);
 
-            if (consumption > 0) {
-                const t1Usage = Math.min(consumption, t1T);
-                consumptionCharge += t1Usage * t1R;
-                if (consumption > t1T) {
-                    const t2Usage = Math.min(consumption - t1T, t2T - t1T);
-                    consumptionCharge += t2Usage * t2R;
-                    if (consumption > t2T) {
-                        const t3Usage = consumption - t2T;
-                        consumptionCharge += t3Usage * t3R;
-                    }
-                }
-            }
-
-            // 2. Fetch Customer Details for Discounts
+            // Fetch Customer Details for Discounts and Type
             const { data: customer, error: custError } = await supabase
                 .from('customers')
-                .select('has_discount, customer_type')
+                .select('*') // Get all fields including meter_size and has_discount
                 .eq('id', customerId)
                 .single();
             
             if (custError) throw custError;
 
-            // 3. Final Total Calculation
-            const baseRate = parseFloat(settings.base_rate) || 150;
-            let totalAmount = baseRate + consumptionCharge;
+            // Determine proper schedule
+            const schedule = schedules.find(s => s.category_key === customer.customer_type);
 
-            // Apply SC/PWD Discount if applicable
-            if (customer.has_discount) {
-                const discountAmount = totalAmount * (parseFloat(settings.discount_percentage || 0) / 100);
-                totalAmount -= discountAmount;
-            }
+            // Use Centered Billing Engine
+            const billData = {
+                consumption: Math.max(0, currentReading - prevReading),
+                customer_id: customerId,
+                due_date: new Date(new Date(readingDate).getTime() + (parseInt(settings.overdue_days || 14) * 24 * 60 * 60 * 1000)).toISOString()
+            };
 
-            // 4. Check for Arrears (Previous Unpaid Bills)
-            const { data: unpaidBills } = await supabase
-                .from('billing')
-                .select('balance')
-                .eq('customer_id', customerId)
-                .neq('status', 'paid');
-            
-            const arrears = unpaidBills ? unpaidBills.reduce((sum, b) => sum + (parseFloat(b.balance) || 0), 0) : 0;
-            totalAmount += arrears;
-
-            // 5. Calculate Due Date (Overdue Policy)
-            const overdueDays = parseInt(settings.overdue_days) || 14;
-            const [y, m, d] = readingDate.split('-').map(Number);
-            const dueDateObj = new Date(y, m - 1, d + overdueDays);
-            const dueDateString = dueDateObj.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
+            const calculation = window.BillingEngine.calculate(billData, customer, settings, schedule);
 
             // 6. Insert New Bill via RPC (Secure)
             const { data: result, error: rpcError } = await supabase.rpc('generate_bill', {
@@ -88,12 +69,13 @@
                 p_current_reading: currentReading,
                 p_previous_reading: prevReading,
                 p_month_date: readingDate,
-                p_amount: totalAmount,
-                p_consumption: consumption,
-                p_due_date: dueDateString,
-                p_base_charge: baseRate,
-                p_consumption_charge: consumptionCharge,
-                p_arrears: arrears
+                p_amount: calculation.totalDue,
+                p_consumption: calculation.consumption,
+                p_due_date: billData.due_date.split('T')[0],
+                p_base_charge: calculation.baseRate,
+                p_consumption_charge: calculation.consumptionCharge,
+                p_penalty: calculation.penalty,
+                p_arrears: calculation.arrears
             });
 
             if (rpcError) throw rpcError;
@@ -211,6 +193,7 @@
         generateBillFromReading,
         recordPayment,
         loadSystemSettings,
+        loadRateSchedules,
         verifyOnlinePayment,
         reactivateCustomer
     };

@@ -103,6 +103,7 @@ function refreshBilling() {
     }
     return Promise.resolve();
 }
+window.refreshBilling = refreshBilling;
 
 /**
  * Trigger refresh of Ledger views (Master or Individual)
@@ -139,12 +140,13 @@ document.addEventListener('DOMContentLoaded', () => {
         window.initPasswordToggles('body');
     }
 
-    // Wait a bit for Supabase to initialize, then load data
-    setTimeout(() => {
+    // Wait for auth verification before loading data
+    document.addEventListener('auth-ready', () => {
+        console.log('✅ Auth ready. Initializing dashboard data...');
         initializeSorting();
         initializeNotificationsUI(); // Initialize notification bell + dropdown
         loadInitialData();
-    }, 100);
+    });
 });
 
 /**
@@ -178,12 +180,14 @@ async function loadInitialData() {
 
         console.log('🚀 Parallel loading initial data...');
 
+        // ===== SETUP REALTIME SUBSCRIPTIONS EARLY =====
+        // We start these before the main load ensuring we catch any changes that happen during load
+        setupRealtimeSubscriptions();
+
         // Use Promise.all for truly parallel execution of independent data fetches
         await Promise.all([
             window.dbOperations.loadDashboardStats(),
-            window.dbOperations.loadRecentReadingsWidget().then(() => {
-                window.dbOperations.initializeRealtimeReadingsWidget();
-            }),
+            window.dbOperations.loadRecentReadingsWidget(),
             refreshCustomers(),
             window.dbOperations.loadStaff(),
             refreshBilling(),
@@ -215,9 +219,6 @@ async function loadInitialData() {
         // Always hide overlay to prevent being stuck
         hideLoadingOverlay();
     }
-
-    // ===== SETUP REALTIME SUBSCRIPTIONS =====
-    setupRealtimeSubscriptions();
 }
 
 function setupRealtimeSubscriptions() {
@@ -230,9 +231,9 @@ function setupRealtimeSubscriptions() {
     subscribeToTable('customers', () => {
         refreshCustomers();
         refreshLedger(); // Update Master/Detail Ledger
-        if (window.dbOperations && window.dbOperations.loadStats) {
+        if (window.dbOperations && window.dbOperations.loadDashboardStats) {
             // Small delay for DELETE to ensure DB is updated
-            setTimeout(() => window.dbOperations.loadStats(), 100);
+            setTimeout(() => window.dbOperations.loadDashboardStats(), 100);
         }
     });
 
@@ -241,20 +242,27 @@ function setupRealtimeSubscriptions() {
         if (window.dbOperations && window.dbOperations.loadStaff) {
             window.dbOperations.loadStaff();
         }
-        if (window.dbOperations && window.dbOperations.loadStats) {
+        if (window.dbOperations && window.dbOperations.loadDashboardStats) {
             // Small delay for DELETE to ensure DB is updated
-            setTimeout(() => window.dbOperations.loadStats(), 100);
+            setTimeout(() => window.dbOperations.loadDashboardStats(), 100);
         }
     });
 
     // Subscribe to billing table
     subscribeToTable('billing', () => {
-        if (window.dbOperations && window.dbOperations.loadBilling) {
-            window.dbOperations.loadBilling();
+        if (typeof refreshBilling === 'function') {
+            refreshBilling();
         }
-        if (window.dbOperations && window.dbOperations.loadStats) {
-            window.dbOperations.loadStats();
+        if (window.dbOperations && window.dbOperations.loadDashboardStats) {
+            window.dbOperations.loadDashboardStats();
         }
+        if (window.dbOperations && window.dbOperations.loadRecentReadingsWidget) {
+            window.dbOperations.loadRecentReadingsWidget();
+        }
+        if (window.dbOperations && window.dbOperations.loadRecentActivities) {
+            window.dbOperations.loadRecentActivities();
+        }
+        
         refreshLedger(); // Update Master/Detail Ledger
 
         // REALTIME: Sync Reading List if visible
@@ -279,9 +287,35 @@ function setupRealtimeSubscriptions() {
     });
 
     // Subscribe to notifications for cutoff-done alerts
-    subscribeToTable('notifications', () => {
+    subscribeToTable('notifications', (payload) => {
+        console.log('[Realtime] Notification event received:', payload.eventType);
+        
+        // Trigger visual feedback only for NEW notifications
+        if (payload.eventType === 'INSERT') {
+            const bellBtn = document.getElementById('notificationBellBtn');
+            if (bellBtn) {
+                bellBtn.classList.remove('bell-ring');
+                void bellBtn.offsetWidth; // Trigger reflow
+                bellBtn.classList.add('bell-ring');
+            }
+
+            if (typeof showNotification === 'function' && payload.new && payload.new.message) {
+                showNotification(payload.new.message, 'info');
+            }
+        }
+        
+        // Always refresh the list on any change (insert, update, delete)
         loadNotifications();
     });
+}
+
+function showLoadingOverlay(message = 'Loading...') {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        const textElement = overlay.querySelector('.loading-text h3');
+        if (textElement) textElement.textContent = message;
+        overlay.classList.remove('fade-out');
+    }
 }
 
 function hideLoadingOverlay() {
@@ -531,12 +565,20 @@ async function populateReadingListFilters() {
                 }
             });
 
-            // Clear and repopulate to avoid doubling if called multiple times
+            // Ensure current month is always present
+            const now = new Date();
+            const currentMonthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+            if (!normalizedMap[currentMonthLabel]) {
+                normalizedMap[currentMonthLabel] = currentMonthLabel;
+            }
+
+            // Clear and repopulate
             periodSelect.innerHTML = '<option value="">All Periods</option>';
             Object.keys(normalizedMap).sort((a, b) => new Date(b) - new Date(a)).forEach(display => {
                 const opt = document.createElement('option');
-                opt.value = normalizedMap[display];
+                opt.value = display; // Use normalized display as the value
                 opt.textContent = display;
+                if (display === currentMonthLabel) opt.selected = true; // Default to current month
                 periodSelect.appendChild(opt);
             });
         } catch (error) {
@@ -793,14 +835,72 @@ async function handlePasswordChange(event) {
 
 function handleViewBill(button) {
     const row = button.closest('tr');
-    // We need to fetch the full data because the table doesn't show everything (tax, penalty, etc.)
-    // But since we don't have a "getBillById" function yet, we can either extract from row (incomplete) 
-    // or fetch. For speed, let's extract what we can and assume default for others or use a data-object.
-    // Better approach: The row should ideally store the full object in a data attribute, or we fetch.
-    // Let's implement a quick fetch by ID or just assume we have the data in the row's scope if we saved it.
-    // Since we didn't save it, let's fetch it using the ID.
     const billId = row.dataset.id;
     showBillModal(billId);
+}
+
+async function showBillModal(billId) {
+    try {
+        const { data: bill, error } = await supabase
+            .from('billing')
+            .select('*, customers(first_name, last_name, meter_number, address)')
+            .eq('id', billId)
+            .single();
+            
+        if (error) throw error;
+        
+        const customer = bill.customers;
+        const customerName = customer ? `${customer.last_name}, ${customer.first_name}` : 'Unknown';
+        
+        const modalHTML = `
+            <div class="modal-overlay" id="billModal">
+                <div class="modal premium-adjustment" style="max-width: 500px; padding: 0;">
+                    <div class="modal-header no-border" style="padding: 1.5rem; border-bottom: 1px solid var(--border);">
+                        <h3 style="margin: 0;">Bill Details - #BIL-${String(bill.id).padStart(4, '0')}</h3>
+                        <button class="modal-close" onclick="closeModal('billModal')" style="background: transparent; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-light);">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="modal-body" style="padding: 1.5rem;">
+                        <div style="margin-bottom: 1.5rem; background: var(--bg-lighter); padding: 1rem; border-radius: 8px;">
+                            <strong>Customer:</strong> ${customerName}<br>
+                            <strong>Address:</strong> ${customer?.address || 'N/A'}<br>
+                            <strong>Meter No:</strong> ${customer?.meter_number || 'N/A'}
+                        </div>
+                        
+                        <div class="stat-box" style="margin-bottom: 1rem; display: flex; justify-content: space-between; background: var(--bg-lighter); padding: 1rem; border-radius: 8px;">
+                            <span>Billing Period:</span>
+                            <strong>${bill.billing_period || 'N/A'}</strong>
+                        </div>
+                        
+                        <table style="width: 100%; margin-bottom: 1.5rem; text-align: left; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 0.75rem 0;">Previous Reading:</td> <td style="text-align: right;">${bill.previous_reading || 0}</td></tr>
+                            <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 0.75rem 0;">Current Reading:</td> <td style="text-align: right;">${bill.current_reading || 0}</td></tr>
+                            <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 0.75rem 0;">Consumption:</td> <td style="text-align: right;"><strong>${bill.consumption || 0} cu.m</strong></td></tr>
+                            <tr style="border-bottom: 1px solid var(--border);"><td style="padding: 0.75rem 0;">Amount Due:</td> <td style="text-align: right; color: var(--primary); font-size: 1.2rem;"><strong>₱${parseFloat(bill.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></td></tr>
+                            <tr><td style="padding: 0.75rem 0;">Status:</td> <td style="text-align: right;"><span class="badge ${bill.status === 'paid' ? 'success' : (bill.status === 'overdue' ? 'danger' : 'warning')}">${(bill.status || 'unknown').toUpperCase()}</span></td></tr>
+                        </table>
+                        
+                        <div class="modal-footer" style="margin: 0; padding: 0;">
+                            <button type="button" class="btn btn-secondary form-control" onclick="closeModal('billModal')" style="width: 100%;">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('modalContainer').innerHTML = modalHTML;
+        
+        const modal = document.getElementById('billModal');
+        modal.style.opacity = '1';
+        modal.style.display = 'flex';
+        void modal.offsetWidth; // Force reflow
+        modal.classList.add('active');
+        
+    } catch (error) {
+        console.error('Error fetching bill details:', error);
+        if (window.showNotification) window.showNotification('Failed to load bill details', 'error');
+    }
 }
 
 // Table action handlers moved to initializeTableActions
@@ -894,6 +994,13 @@ async function handleViewLedger(button) {
         `;
         document.getElementById('modalContainer').innerHTML = modalHTML;
 
+        // Display the modal
+        const modal = document.getElementById('ledgerModal');
+        modal.style.opacity = '1'; // Safety reset mostly for utils bug
+        modal.style.display = 'flex';
+        void modal.offsetWidth; // Force reflow
+        modal.classList.add('active');
+
     } catch (error) {
         console.error('Error loading ledger:', error);
         showNotification('Failed to load ledger', 'error');
@@ -977,21 +1084,80 @@ function initializeAutoAssign() {
     }
 }
 // === SYSTEM SETTINGS ===
-function initializeSettings() {
+window.handlePendingChanges = function(hasChanges) {
+    const syncBar = document.getElementById('settingsSyncIndicator');
     const saveBtn = document.getElementById('saveSettingsBtn');
+    
+    if (hasChanges) {
+        window.hasUnsavedChanges = true;
+        if (syncBar) {
+            syncBar.style.opacity = '1';
+            syncBar.style.transform = 'scaleX(0.4)';
+            syncBar.style.background = 'var(--card-accent-1)';
+        }
+        if (saveBtn) {
+            saveBtn.style.boxShadow = '0 0 20px rgba(16, 185, 129, 0.3)';
+            saveBtn.classList.add('pulse-active');
+        }
+    } else {
+        window.hasUnsavedChanges = false;
+        if (syncBar) {
+            setTimeout(() => {
+                if (!window.hasUnsavedChanges) {
+                    syncBar.style.opacity = '0';
+                    syncBar.style.transform = 'scaleX(0)';
+                }
+            }, 1000);
+        }
+        if (saveBtn) {
+            saveBtn.style.boxShadow = 'none';
+            saveBtn.classList.remove('pulse-active');
+        }
+    }
+};
+
+function initializeSettings() {
     const changePINBtn = document.getElementById('changePINBtn');
+    const saveBtn = document.getElementById('saveSettingsBtn');
 
     if (saveBtn) {
         saveBtn.addEventListener('click', async () => {
-            if (!window.currentSettings) {
-                showNotification('Settings not loaded. Attempting to refresh...', 'info');
-                await loadSystemSettingsIntoForm();
-                if (!window.currentSettings) return;
-            }
-
-            // Security gate before saving settings
+            // Security gate before saving
             showPINVerifyModal(async () => {
-                await saveSettingsChanges();
+                const originalContent = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+                saveBtn.disabled = true;
+
+                try {
+                    const syncBar = document.getElementById('settingsSyncIndicator');
+                    if (syncBar) {
+                        syncBar.style.transform = 'scaleX(0.7)';
+                        syncBar.style.background = '#3B82F6';
+                        syncBar.style.opacity = '1';
+                    }
+
+                    await saveSettingsChanges();
+                    
+                    showNotification('System settings updated successfully', 'success');
+                    handlePendingChanges(false);
+                    
+                    if (syncBar) {
+                        syncBar.style.transform = 'scaleX(1)';
+                        syncBar.style.background = '#10B981';
+                        setTimeout(() => {
+                            syncBar.style.opacity = '0';
+                            setTimeout(() => syncBar.style.transform = 'scaleX(0)', 400);
+                        }, 1500);
+                    }
+                } catch (err) {
+                    console.error('Save failed:', err);
+                    showNotification('Failed to save settings: ' + err.message, 'error');
+                    const syncBar = document.getElementById('settingsSyncIndicator');
+                    if (syncBar) syncBar.style.background = '#EF4444';
+                } finally {
+                    saveBtn.innerHTML = originalContent;
+                    saveBtn.disabled = false;
+                }
             });
         });
     }
@@ -1005,26 +1171,28 @@ function initializeSettings() {
 
 window.showPINVerifyModal = function (onConfirm) {
     const modalHTML = `
-        <div class="modal-overlay" id="verifyPINModal">
-            <div class="modal pin-verify-modal">
-                <div class="modal-body" style="padding: 0;">
-                    <div class="pin-verify-header">
-                        <div class="pin-verify-icon">
-                            <i class="fas fa-lock"></i>
-                        </div>
-                        <h3 class="no-margin">Access Verification</h3>
-                        <p class="pin-verify-text">Enter System PIN to continue</p>
+        <div class="premium-modal-overlay" id="verifyPINModal">
+            <div class="premium-card">
+                <div class="premium-header-accent"></div>
+                <div class="premium-body">
+                    <div class="premium-icon-circle">
+                        <i class="fas fa-lock"></i>
                     </div>
+                    <h3 class="premium-title">Access Verification</h3>
+                    <p class="premium-description">Enter System PIN to continue</p>
                     
-                    <form id="verifyPINForm" class="pin-verify-form">
+                    <form id="verifyPINForm" class="premium-form">
                         <div class="form-group">
-                            <input type="password" id="verifyPINInput" class="form-control pin-input-field" 
-                                    placeholder="••••" required maxlength="6" />
+                            <input type="password" id="verifyPINInput" class="form-control premium-pin-input" 
+                                    placeholder="••••" required maxlength="6" inputmode="numeric" pattern="[0-9]*" />
                         </div>
                         
-                        <div class="modal-footer-flex">
-                            <button type="button" class="btn btn-secondary flex-1" onclick="closeModal('verifyPINModal')">Cancel</button>
-                            <button type="submit" class="btn btn-primary flex-1">Verify PIN</button>
+                        <div class="premium-actions">
+                            <button type="submit" class="btn-premium-confirm">
+                                <span>Verify PIN</span>
+                                <i class="fas fa-chevron-right"></i>
+                            </button>
+                            <button type="button" class="btn-premium-cancel" onclick="closeModal('verifyPINModal')">Cancel</button>
                         </div>
                     </form>
                 </div>
@@ -1033,6 +1201,14 @@ window.showPINVerifyModal = function (onConfirm) {
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Activation logic for visibility
+    const modal = document.getElementById('verifyPINModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
     const input = document.getElementById('verifyPINInput');
     input.focus();
 
@@ -1060,10 +1236,10 @@ window.showPINVerifyModal = function (onConfirm) {
             showNotification('Incorrect PIN. Access Denied.', 'error');
 
             // Shake effect
-            const modal = document.querySelector('#verifyPINModal .modal');
-            modal.style.animation = 'none';
-            void modal.offsetWidth; // trigger reflow
-            modal.style.animation = 'shake 0.4s cubic-bezier(.36,.07,.19,.97) both';
+            const card = document.querySelector('#verifyPINModal .premium-card');
+            card.classList.remove('shake-glitch');
+            void card.offsetWidth; // trigger reflow
+            card.classList.add('shake-glitch');
             input.value = '';
             input.focus();
         }
@@ -1072,39 +1248,48 @@ window.showPINVerifyModal = function (onConfirm) {
 
 window.showChangePINModal = function () {
     const modalHTML = `
-        <div class="modal-overlay" id="changePINModal">
-            <div class="modal small-modal">
-                <div class="modal-header">
-                    <h3>Update System PIN</h3>
-                    <button class="modal-close" onclick="closeModal('changePINModal')">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                
-                <form class="modal-form" id="changePINForm">
-                    <div class="form-group">
-                        <label>Current PIN</label>
-                        <input type="password" id="currentPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" />
+        <div class="premium-modal-overlay" id="changePINModal">
+            <div class="premium-card">
+                <div class="premium-header-accent" style="background: linear-gradient(90deg, #10B981, #059669);"></div>
+                <div class="premium-body">
+                    <div class="premium-icon-circle" style="background: rgba(16, 185, 129, 0.1); color: #10B981;">
+                        <i class="fas fa-key"></i>
                     </div>
-                    <div class="form-group divider-top">
-                        <label>New PIN (4-6 digits)</label>
-                        <input type="password" id="newPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" />
-                    </div>
-                    <div class="form-group">
-                        <label>Confirm New PIN</label>
-                        <input type="password" id="confirmPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" />
-                    </div>
+                    <h3 class="premium-title">Update System PIN</h3>
+                    <p class="premium-description">Choose a secure 4-6 digit code</p>
                     
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('changePINModal')">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Update PIN</button>
-                    </div>
-                </form>
+                    <form class="premium-form" id="changePINForm" style="text-align: left;">
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; display: block;">Current PIN</label>
+                            <input type="password" id="currentPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" style="text-align: center; font-size: 1.25rem; letter-spacing: 0.5rem;" />
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; display: block;">New PIN (4-6 digits)</label>
+                            <input type="password" id="newPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" style="text-align: center; font-size: 1.25rem; letter-spacing: 0.5rem;" />
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1.5rem;">
+                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; display: block;">Confirm New PIN</label>
+                            <input type="password" id="confirmPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" style="text-align: center; font-size: 1.25rem; letter-spacing: 0.5rem;" />
+                        </div>
+                        
+                        <div class="premium-actions">
+                            <button type="submit" class="btn-premium-confirm" style="background: #10B981;">Update PIN</button>
+                            <button type="button" class="btn-premium-cancel" onclick="closeModal('changePINModal')">Cancel</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+
+    // Activation logic for visibility
+    const modal = document.getElementById('changePINModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
 
     // Initialize password toggles
     if (window.initPasswordToggles) {
@@ -1152,10 +1337,10 @@ window.showChangePINModal = function () {
 };
 
 async function loadSystemSettingsIntoForm() {
+    const saveBtn = document.getElementById('saveSettingsBtn');
     try {
         if (!window.dbOperations || !window.dbOperations.loadSystemSettings) return;
 
-        const saveBtn = document.getElementById('saveSettingsBtn');
         if (saveBtn) saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
 
         window.currentSettings = await window.dbOperations.loadSystemSettings();
@@ -1186,10 +1371,41 @@ async function loadSystemSettingsIntoForm() {
             setVal('settingCutoffGrace', graceValue);
         }
 
-        // Reset unsaved changes flag when form loads
-        window.hasUnsavedChanges = false;
+        // Live Rate Schedules Refresh
+        try {
+            const schedules = await window.dbOperations.loadRateSchedules();
+            schedules.forEach(s => {
+                const key = s.category_key;
+                const minEl = document.querySelector(`[data-rate="${key}-minimum"]`);
+                const t1El = document.querySelector(`[data-rate="${key}-tier1"]`);
+                const t2El = document.querySelector(`[data-rate="${key}-tier2"]`);
+                const t3El = document.querySelector(`[data-rate="${key}-tier3"]`);
+                const t4El = document.querySelector(`[data-rate="${key}-tier4"]`);
 
-        // Add change listeners to all settings inputs
+                if (minEl) minEl.textContent = `₱${parseFloat(s.min_charge_1_2).toFixed(2)}`;
+                if (t1El) t1El.textContent = `₱${parseFloat(s.tier1_rate * s.factor).toFixed(2)}`;
+                if (t2El) t2El.textContent = `₱${parseFloat(s.tier2_rate * s.factor).toFixed(2)}`;
+                if (t3El) t3El.textContent = `₱${parseFloat(s.tier3_rate * s.factor).toFixed(2)}`;
+                if (t4El) t4El.textContent = `₱${parseFloat(s.tier4_rate * s.factor).toFixed(2)}`;
+            });
+        } catch (err) {
+            console.error('Failed to load rates for dashboard:', err);
+        }
+
+        // Ensure edit buttons are wired up
+        if (typeof initializeRateEditing === 'function') {
+            initializeRateEditing();
+        }
+
+        // Clear pending flags
+        window.hasUnsavedChanges = false;
+        
+        if (saveBtn) {
+            saveBtn.innerHTML = '<i class="fas fa-save" style="margin-right: 8px;"></i> <span>Save Changes</span>';
+            saveBtn.style.display = 'flex';
+        }
+
+        // Apply change listeners to all settings inputs
         const settingsInputs = [
             'base_rate', 'tier1_threshold', 'tier1_rate', 'tier2_threshold',
             'tier2_rate', 'tier3_rate', 'settingDiscount', 'settingPenalty',
@@ -1198,27 +1414,20 @@ async function loadSystemSettingsIntoForm() {
 
         settingsInputs.forEach(inputId => {
             const input = document.getElementById(inputId);
-            if (input && !input.dataset.changeListenerAdded) {
-                input.addEventListener('input', () => {
-                    window.hasUnsavedChanges = true;
-                    if (saveBtn) {
-                        saveBtn.classList.remove('btn-primary');
-                        saveBtn.classList.add('btn-warning');
-                        saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Settings (Unsaved)';
-                    }
-                });
-                input.dataset.changeListenerAdded = 'true';
+            if (input) {
+                // Ensure inputs are enabled by default
+                input.disabled = false;
+                
+                if (!input.dataset.changeListenerAdded) {
+                    input.addEventListener('input', () => {
+                        handlePendingChanges(true);
+                    });
+                    input.dataset.changeListenerAdded = 'true';
+                }
             }
         });
-
-        if (saveBtn) {
-            saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Settings';
-            saveBtn.classList.remove('btn-danger', 'btn-warning');
-            saveBtn.classList.add('btn-primary');
-        }
     } catch (error) {
         console.error('Error loading settings into form:', error);
-        const saveBtn = document.getElementById('saveSettingsBtn');
         if (saveBtn) {
             saveBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Error: ' + (error.message || 'Retry Load');
             saveBtn.classList.remove('btn-primary');
@@ -1276,17 +1485,13 @@ async function saveSettingsChanges() {
         console.log('Pushing Settings Update:', updatedData);
         await window.dbOperations.updateSystemSettings(updatedData);
         window.currentSettings = updatedData;
-        showNotification('Settings saved successfully', 'success');
-
-        loadSystemSettingsIntoForm(); // Refresh
+        console.log('Settings auto-saved');
 
         // Reset unsaved flag
         window.hasUnsavedChanges = false;
-        document.getElementById('saveSettingsBtn').classList.remove('btn-warning');
-        document.getElementById('saveSettingsBtn').innerHTML = '<i class="fas fa-save"></i> Save Settings';
     } catch (error) {
         console.error('Error saving settings:', error);
-        showNotification('Failed to save settings', 'error');
+        throw error;
     }
 }
 
@@ -1324,6 +1529,10 @@ function initializeSearchFilters() {
     const billingSearch = document.getElementById('billingSearch');
     const billingStatus = document.getElementById('billingStatusFilter');
     const billingMonth = document.getElementById('billingMonthFilter');
+    const billingBarangay = document.getElementById('billingBarangayFilter');
+
+    // Populate billing barangay dropdown
+    populateBarangayFilters('billingBarangayFilter');
 
     // Customer Filters
     const updateCustomerFilters = () => {
@@ -1358,13 +1567,175 @@ function initializeSearchFilters() {
         window.dbOperations.loadBilling({
             search: billingSearch?.value || '',
             status: billingStatus?.value || '',
-            month: billingMonth?.value || ''
+            month: billingMonth?.value || '',
+            barangay: billingBarangay?.value || ''
         });
     };
 
     if (billingSearch) billingSearch.addEventListener('input', debounce(updateBillingFilters, 300));
     if (billingStatus) billingStatus.addEventListener('change', updateBillingFilters);
     if (billingMonth) billingMonth.addEventListener('change', updateBillingFilters);
+    if (billingBarangay) billingBarangay.addEventListener('change', updateBillingFilters);
+
+    // Initialize Print Billing Summary
+    const printBillingBtn = document.getElementById('printBillingSummaryBtn');
+    const printMenu = document.getElementById('printReportMenu');
+    
+    if (printBillingBtn && printMenu) {
+        printBillingBtn.onclick = (e) => {
+            e.stopPropagation();
+            const isVisible = printMenu.style.display === 'block';
+            printMenu.style.display = isVisible ? 'none' : 'block';
+        };
+
+        // Close on outside click
+        document.addEventListener('click', () => {
+            printMenu.style.display = 'none';
+        });
+
+        const printLinks = printMenu.querySelectorAll('.dropdown-item');
+        printLinks.forEach(link => {
+            link.onclick = async (e) => {
+                e.preventDefault();
+                const type = link.dataset.type;
+                const statusFilter = document.getElementById('billingStatusFilter');
+                if (statusFilter) {
+                    statusFilter.value = type;
+                    // Trigger refresh and wait
+                    if (window.refreshBilling) {
+                        try {
+                            showLoadingOverlay('Preparing report...');
+                            await window.refreshBilling();
+                            initPrintBillingSummary(type);
+                        } finally {
+                            hideLoadingOverlay();
+                        }
+                    }
+                }
+            };
+        });
+    }
+}
+
+/**
+ * Handle printing the current filtered billing list as a summary
+ * Grouped by Barangay
+ */
+async function initPrintBillingSummary(reportType = '') {
+    const data = window.lastBillingData || [];
+    console.log(`[PrintSummary] Initializing print for ${data.length} records (${reportType})...`);
+    
+    if (data.length === 0) {
+        showNotification('No billing records found to print.', 'warning');
+        return;
+    }
+
+    const printContainer = document.getElementById('billingSummaryPrintContent');
+    const periodSpan = document.getElementById('printBillingPeriod');
+    const statsSpan = document.getElementById('printBillingStats');
+
+    if (!printContainer) {
+        console.error('[PrintSummary] Print container not found!');
+        return;
+    }
+
+    // Set professional metadata
+    const activePeriod = document.getElementById('billingMonthFilter')?.value || 'All Periods';
+    const reportTitle = reportType ? (reportType.charAt(0).toUpperCase() + reportType.slice(1)) : 'Billing';
+    
+    // Update the header in the print view if it exists
+    const reportHeader = document.querySelector('#billingSummaryPrintView h2');
+    if (reportHeader) {
+        reportHeader.textContent = `${reportTitle.toUpperCase()} SUMMARY REPORT`;
+    }
+
+    periodSpan.textContent = `Period: ${activePeriod}`;
+    statsSpan.textContent = `Generated on: ${pwdUtils.formatLocalDateTime(new Date())}`;
+
+    // Group by Barangay
+    const grouped = {};
+    data.forEach(bill => {
+        // Fallback if getBarangay is not available or returns null
+        let brgy = 'Unknown';
+        if (typeof getBarangay === 'function') {
+            brgy = getBarangay(bill.customers?.address || 'Unknown') || 'Unknown';
+        }
+        
+        if (!grouped[brgy]) grouped[brgy] = [];
+        grouped[brgy].push(bill);
+    });
+
+    const sortedBrgys = Object.keys(grouped).sort();
+    console.log(`[PrintSummary] Grouped into ${sortedBrgys.length} barangays:`, sortedBrgys);
+
+    // Generate HTML
+    let html = '';
+    sortedBrgys.forEach(brgy => {
+        html += `<div class="barangay-group-header">${brgy.toUpperCase()}</div>`;
+        const isDisconnectedReport = reportType === 'disconnected';
+
+        html += `
+            <table class="summary-print-table">
+                <thead>
+                    <tr>
+                        <th style="width: 100px;">Bill Number</th>
+                        <th style="width: 110px;">Account Number</th>
+                        <th>Customer Name</th>
+                        <th style="width: 100px;">Meter Number</th>
+                        <th style="width: 100px; text-align: right;">Amount</th>
+                        <th style="width: 100px;">Due Date</th>
+                        <th style="width: 80px;">Status</th>
+                        ${isDisconnectedReport ? '<th style="width: 110px;">Disconnected On</th>' : ''}
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        grouped[brgy].forEach(bill => {
+            const customer = bill.customers;
+            const middleInitial = customer?.middle_initial ? ` ${customer.middle_initial}.` : '';
+            const name = customer ? `${customer.last_name}, ${customer.first_name}${middleInitial}` : 'Unknown';
+            const amount = (parseFloat(bill.balance) || parseFloat(bill.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 });
+            const dueDate = bill.due_date ? new Date(bill.due_date).toLocaleDateString() : '--/--/----';
+            const billNumber = `BILL-${String(bill.id).padStart(3, '0')}`;
+            const accountNumber = customer?.id ? `ACC-${String(customer.id).padStart(3, '0')}` : '---';
+            const disconnDate = customer?.disconnection_date ? new Date(customer.disconnection_date).toLocaleDateString() : '---';
+
+            html += `
+                <tr>
+                    <td>${billNumber}</td>
+                    <td>${accountNumber}</td>
+                    <td>${name}</td>
+                    <td>${customer?.meter_number || '---'}</td>
+                    <td style="text-align: right;">₱${amount}</td>
+                    <td>${dueDate}</td>
+                    <td>${(bill.status || '').toUpperCase()}</td>
+                    ${isDisconnectedReport ? `<td>${disconnDate}</td>` : ''}
+                </tr>
+            `;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        `;
+    });
+
+    printContainer.innerHTML = html;
+
+    // Trigger Print
+    document.body.classList.add('printing-billing-summary');
+    
+    // Final check for visibility and layout reflow
+    window.dispatchEvent(new Event('resize'));
+    
+    // Give browser substantial time to reflow/render a large (5-page) HTML table
+    setTimeout(() => {
+        window.print();
+        setTimeout(() => {
+            document.body.classList.remove('printing-billing-summary');
+        }, 500);
+    }, 500); // Increased to 500ms for large reports
 }
 
 // === CUSTOM CONFIRMATION MODALS ===
@@ -1393,6 +1764,14 @@ function showUnsavedChangesModal(onConfirm) {
     `;
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Activation logic for visibility
+    const modal = document.getElementById('unsavedChangesModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
     document.getElementById('confirmDiscardBtn').addEventListener('click', () => {
         closeModal('unsavedChangesModal');
         if (onConfirm) onConfirm();
@@ -1524,7 +1903,7 @@ function updateDashboardCharts(data) {
                 data: {
                     labels: data.consumption.labels,
                     datasets: [{
-                        label: 'Consumption (m³)',
+                        label: 'Consumption (cu.m.)',
                         data: data.consumption.values,
                         borderColor: '#0288D1',
                         backgroundColor: 'rgba(2, 136, 209, 0.1)',
@@ -1545,7 +1924,7 @@ function updateDashboardCharts(data) {
                     scales: {
                         y: {
                             beginAtZero: true,
-                            title: { display: true, text: 'Consumption (m³)', font: { family: 'Inter', size: 11, weight: '600' }, color: '#64748B' },
+                            title: { display: true, text: 'Consumption (cu.m.)', font: { family: 'Inter', size: 11, weight: '600' }, color: '#64748B' },
                             grid: { color: 'rgba(148, 163, 184, 0.05)' },
                             ticks: { font: { family: 'Inter', size: 11 }, color: '#64748B' }
                         },
@@ -1668,21 +2047,27 @@ window.updateDashboardCharts = updateDashboardCharts;
 
 function initializeLedgerPage() {
     const barangayFilter = document.getElementById('ledgerBarangayFilter');
+    const periodFilter = document.getElementById('ledgerPeriodFilter');
     const searchInput = document.getElementById('ledgerSearch');
     const backBtn = document.getElementById('backToMasterBtnDetail');
 
     // Populate Barangays if not already
     populateBarangayFilters('ledgerBarangayFilter');
 
+    // Populate Period filter from billing data
+    populateLedgerPeriodFilter();
+
     // Event Listeners
     const updateLedger = () => {
         window.dbOperations.loadMasterLedger({
-            barangay: barangayFilter.value,
-            search: searchInput.value
+            barangay: barangayFilter?.value || '',
+            search: searchInput?.value || '',
+            period: periodFilter?.value || ''
         });
     };
 
     barangayFilter?.addEventListener('change', updateLedger);
+    periodFilter?.addEventListener('change', updateLedger);
     searchInput?.addEventListener('input', debounce(updateLedger, 300));
 
     // Print Logic
@@ -1752,6 +2137,43 @@ function populateBarangayFilters(selectId) {
         opt.textContent = bg;
         filter.appendChild(opt);
     });
+}
+
+/**
+ * Populate the ledger period filter from unique billing_period values in DB
+ */
+async function populateLedgerPeriodFilter() {
+    const select = document.getElementById('ledgerPeriodFilter');
+    if (!select || select.options.length > 1) return;
+
+    try {
+        const { data, error } = await supabase
+            .from('billing')
+            .select('billing_period');
+
+        if (error) throw error;
+
+        // Normalize all raw values and deduplicate by normalized key
+        // e.g. '02/25/2026', '02/24/2026', 'February 2026' all → 'February 2026'
+        const normalizedMap = {}; // normalized display → first matching raw value
+        data.forEach(b => {
+            const raw = b.billing_period;
+            if (!raw) return;
+            const key = typeof normalizePeriod === 'function' ? normalizePeriod(raw) : raw;
+            if (key && !normalizedMap[key]) {
+                normalizedMap[key] = raw;
+            }
+        });
+
+        // Sort descending (most recent first)
+        const sortedKeys = Object.keys(normalizedMap).sort((a, b) => new Date(b) - new Date(a));
+
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">All Periods</option>' +
+            sortedKeys.map(display => `<option value="${display}" ${display === currentVal ? 'selected' : ''}>${display}</option>`).join('');
+    } catch (e) {
+        console.error('Could not populate ledger period filter:', e);
+    }
 }
 
 /**
@@ -1830,65 +2252,45 @@ function initializeStatMarquee() {
 
 
 // === EDIT RATE CATEGORY MODAL ===
-window.showEditRateModal = function (category) {
-    // Rate data structure
-    const rateData = {
-        'residential': {
-            title: 'Residential Rates',
-            icon: 'fa-home',
-            color: '#0288D1',
-            minimum: '260.00',
-            tier1: '27.25',
-            tier2: '28.75',
-            tier3: '30.75',
-            tier4: '33.25'
-        },
-        'commercial-a': {
-            title: 'Commercial A Rates',
-            icon: 'fa-store',
-            color: '#43A047',
-            minimum: '455.00',
-            tier1: '47.69',
-            tier2: '50.31',
-            tier3: '53.81',
-            tier4: '58.19'
-        },
-        'commercial-b': {
-            title: 'Commercial B Rates',
-            icon: 'fa-building',
-            color: '#FB8C00',
-            minimum: '390.00',
-            tier1: '40.88',
-            tier2: '43.12',
-            tier3: '46.12',
-            tier4: '49.88'
-        },
-        'full-commercial': {
-            title: 'Full Commercial Rates',
-            icon: 'fa-industry',
-            color: '#E53935',
-            minimum: '520.00',
-            tier1: '54.50',
-            tier2: '57.50',
-            tier3: '61.50',
-            tier4: '66.50'
-        }
-    };
+window.showEditRateModal = async function (category) {
+    // 1. Fetch current rate schedules from DB
+    let schedules = [];
+    try {
+        schedules = await window.dbOperations.loadRateSchedules();
+    } catch (e) {
+        showNotification('Failed to load seasonal rates.', 'error');
+        return;
+    }
 
-    const data = rateData[category];
-    if (!data) return;
+    // 2. Find the requested category
+    const schedule = schedules.find(s => s.category_key === category);
+    if (!schedule) {
+        showNotification('Rate category not found in database.', 'error');
+        return;
+    }
+
+    // Icon/Color Mapping
+    const visuals = {
+        'residential': { icon: 'fa-home', color: '#0288D1' },
+        'full-commercial': { icon: 'fa-industry', color: '#E53935' },
+        'commercial-a': { icon: 'fa-store', color: '#43A047' },
+        'commercial-b': { icon: 'fa-store-alt', color: '#FB8C00' },
+        'commercial-c': { icon: 'fa-briefcase', color: '#8E24AA' },
+        'bulk': { icon: 'fa-truck-loading', color: '#546E7A' }
+    };
+    const style = visuals[category] || { icon: 'fa-tint', color: 'var(--primary)' };
 
     const modalHTML = `
-        <div class="modal-overlay glass-effect" id="editRateModal" style="--btn-color: ${data.color}; --btn-color-rgb: ${window.hexToRgb ? window.hexToRgb(data.color) : '0, 102, 255'};">
+        <div class="modal-overlay glass-effect" id="editRateModal" style="--btn-color: ${style.color}; --btn-color-rgb: ${window.hexToRgb ? window.hexToRgb(style.color) : '0, 102, 255'};">
             <div class="modal premium-adjustment">
                 <div class="modal-header no-border" style="padding: 1rem 1.25rem 0.5rem 1.25rem;">
                     <div style="display: flex; align-items: center; gap: 0.6rem;">
-                        <div style="width: 28px; height: 28px; border-radius: 6px; background: ${data.color}; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem;">
-                            <i class="fas ${data.icon}"></i>
+                        <div style="width: 28px; height: 28px; border-radius: 6px; background: ${style.color}; display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem;">
+                            <i class="fas ${style.icon}"></i>
                         </div>
                         <div>
-                            <h3 style="font-size: 0.9rem; margin: 0; color: var(--text-primary);">Adjust ${data.title}</h3>
-                            <p style="font-size: 0.7rem; color: var(--text-light); margin: 0;">Update rates for this category</p>
+                            <h3 style="font-size: 0.9rem; margin: 0; color: var(--text-primary);">Adjust ${schedule.display_name}</h3>
+                            <p style="font-size: 0.7rem; color: var(--text-light); margin: 0;">Update factor and base rates</p>
                         </div>
                     </div>
                     <button class="modal-close" onclick="closeModal('editRateModal')" style="color: var(--text-light); background: transparent; border: none; cursor: pointer;">
@@ -1897,27 +2299,33 @@ window.showEditRateModal = function (category) {
                 </div>
                 
                 <form class="modal-form" id="editRateForm" style="padding: 1rem 1.25rem;">
-                    <div class="form-group-compact" style="background: rgba(var(--btn-color-rgb), 0.05); padding: 0.75rem; border-radius: 12px; margin-bottom: 1rem; border: 1px solid rgba(var(--btn-color-rgb), 0.1);">
-                        <label style="color: ${data.color}; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; margin-bottom: 0.4rem; display: block;">Minimum Rate (0-10 cu.m.)</label>
-                        <input type="number" id="rateMinimum" class="input-pill" style="width: 100%; font-size: 1.1rem; height: 40px; border-color: ${data.color}33;" step="0.01" value="${data.minimum}" required />
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="form-group-compact" style="background: rgba(var(--btn-color-rgb), 0.05); padding: 0.75rem; border-radius: 12px; border: 1px solid rgba(var(--btn-color-rgb), 0.1);">
+                            <label style="color: ${style.color}; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; margin-bottom: 0.4rem; display: block;">Classification Factor</label>
+                            <input type="number" id="rateFactor" class="input-pill" style="width: 100%; font-size: 1.1rem; height: 40px;" step="0.01" value="${schedule.factor}" required />
+                        </div>
+                        <div class="form-group-compact" style="background: rgba(var(--text-primary-rgb, 0,0,0), 0.02); padding: 0.75rem; border-radius: 12px; border: 1px solid var(--border-color);">
+                            <label style="font-size: 0.65rem; font-weight: 700; text-transform: uppercase; margin-bottom: 0.4rem; display: block;">Base Minimum (1/2")</label>
+                            <input type="number" id="rateMinimum" class="input-pill" style="width: 100%; font-size: 1.1rem; height: 40px;" step="0.01" value="${schedule.min_charge_1_2}" required />
+                        </div>
                     </div>
 
                     <div class="tier-input-grid">
                         <div class="form-group-compact">
-                            <label style="font-size: 0.65rem; color: var(--text-light); display: block; margin-bottom: 0.3rem; font-weight: 600;">11-20 cu.m.</label>
-                            <input type="number" id="rateTier1" class="input-pill" style="width: 100%; font-size: 0.85rem; height: 38px;" step="0.01" value="${data.tier1}" required />
+                            <label style="font-size: 0.65rem; color: var(--text-light); display: block; margin-bottom: 0.3rem; font-weight: 600;">Tier 1 Base (11-20)</label>
+                            <input type="number" id="rateTier1" class="input-pill" style="width: 100%; font-size: 0.85rem; height: 38px;" step="0.01" value="${schedule.tier1_rate}" required />
                         </div>
                         <div class="form-group-compact">
-                            <label style="font-size: 0.65rem; color: var(--text-light); display: block; margin-bottom: 0.3rem; font-weight: 600;">21-30 cu.m.</label>
-                            <input type="number" id="rateTier2" class="input-pill" style="width: 100%; font-size: 0.85rem; height: 38px;" step="0.01" value="${data.tier2}" required />
+                            <label style="font-size: 0.65rem; color: var(--text-light); display: block; margin-bottom: 0.3rem; font-weight: 600;">Tier 2 Base (21-30)</label>
+                            <input type="number" id="rateTier2" class="input-pill" style="width: 100%; font-size: 0.85rem; height: 38px;" step="0.01" value="${schedule.tier2_rate}" required />
                         </div>
                         <div class="form-group-compact">
-                            <label style="font-size: 0.65rem; color: var(--text-light); display: block; margin-bottom: 0.3rem; font-weight: 600;">31-40 cu.m.</label>
-                            <input type="number" id="rateTier3" class="input-pill" style="width: 100%; font-size: 0.85rem; height: 38px;" step="0.01" value="${data.tier3}" required />
+                            <label style="font-size: 0.65rem; color: var(--text-light); display: block; margin-bottom: 0.3rem; font-weight: 600;">Tier 3 Base (31-40)</label>
+                            <input type="number" id="rateTier3" class="input-pill" style="width: 100%; font-size: 0.85rem; height: 38px;" step="0.01" value="${schedule.tier3_rate}" required />
                         </div>
                         <div class="form-group-compact">
-                            <label style="font-size: 0.65rem; color: var(--text-light); display: block; margin-bottom: 0.3rem; font-weight: 600;">41-up cu.m.</label>
-                            <input type="number" id="rateTier4" class="input-pill" style="width: 100%; font-size: 0.85rem; height: 38px;" step="0.01" value="${data.tier4}" required />
+                            <label style="font-size: 0.65rem; color: var(--text-light); display: block; margin-bottom: 0.3rem; font-weight: 600;">Tier 4 Base (41-UP)</label>
+                            <input type="number" id="rateTier4" class="input-pill" style="width: 100%; font-size: 0.85rem; height: 38px;" step="0.01" value="${schedule.tier4_rate}" required />
                         </div>
                     </div>
 
@@ -1930,7 +2338,7 @@ window.showEditRateModal = function (category) {
                     
                     <div class="modal-footer no-border" style="padding-top: 1rem; display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem;">
                         <button type="button" class="btn-premium btn-premium-outline" style="flex: 0.4;" onclick="closeModal('editRateModal')">Discard</button>
-                        <button type="submit" id="btnUpdateRates" class="btn-premium btn-premium-primary" style="flex: 1; background: ${data.color}; border: none; color: #fff;">
+                        <button type="submit" id="btnUpdateRates" class="btn-premium btn-premium-primary" style="flex: 1; background: ${style.color}; border: none; color: #fff;">
                             Update Rates
                         </button>
                     </div>
@@ -1941,11 +2349,18 @@ window.showEditRateModal = function (category) {
 
     document.getElementById('modalContainer').innerHTML = modalHTML;
 
+    // Activation logic for visibility
+    const modal = document.getElementById('editRateModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
     // Helper to get RGB
     if (!window.hexToRgb) {
         window.hexToRgb = (hex) => {
             const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-            return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : null;
+            return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '0, 102, 255';
         };
     }
 
@@ -1958,7 +2373,6 @@ window.showEditRateModal = function (category) {
         const btnUpdate = document.getElementById('btnUpdateRates');
 
         if (!isPinVisible) {
-            // First step: Show PIN section
             pinSection.classList.add('visible');
             btnUpdate.innerHTML = '<i class="fas fa-check-circle"></i> Confirm Changes';
             isPinVisible = true;
@@ -1966,8 +2380,8 @@ window.showEditRateModal = function (category) {
             return;
         }
 
-        // Second step: Verify and save
         const pin = document.getElementById('ratePIN').value;
+        const factor = document.getElementById('rateFactor').value;
         const minimum = document.getElementById('rateMinimum').value;
         const tier1 = document.getElementById('rateTier1').value;
         const tier2 = document.getElementById('rateTier2').value;
@@ -1992,42 +2406,29 @@ window.showEditRateModal = function (category) {
                 return;
             }
 
-            // Update rates in the UI
-            document.querySelector(`[data-rate="${category}-minimum"]`).textContent = `₱${parseFloat(minimum).toFixed(2)}`;
-            document.querySelector(`[data-rate="${category}-tier1"]`).textContent = `₱${parseFloat(tier1).toFixed(2)}`;
-            document.querySelector(`[data-rate="${category}-tier2"]`).textContent = `₱${parseFloat(tier2).toFixed(2)}`;
-            document.querySelector(`[data-rate="${category}-tier3"]`).textContent = `₱${parseFloat(tier3).toFixed(2)}`;
-            document.querySelector(`[data-rate="${category}-tier4"]`).textContent = `₱${parseFloat(tier4).toFixed(2)}`;
+            btnUpdate.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving to DB...';
+            
+            await window.dbOperations.updateRateSchedule(schedule.id, {
+                factor: parseFloat(factor),
+                min_charge_1_2: parseFloat(minimum),
+                tier1_rate: parseFloat(tier1),
+                tier2_rate: parseFloat(tier2),
+                tier3_rate: parseFloat(tier3),
+                tier4_rate: parseFloat(tier4)
+            });
 
-            // Sync changes to hidden inputs for "Save Settings"
-            if (category === 'residential') {
-                const setHidden = (id, val) => {
-                    const el = document.getElementById(id);
-                    if (el) el.value = val;
-                };
-                setHidden('base_rate', minimum); // Assuming minimum is base rate
-                setHidden('tier1_rate', tier1);
-                setHidden('tier2_rate', tier2);
-                setHidden('tier3_rate', tier3);
-            }
-
-            // Flag as unsaved
-            window.hasUnsavedChanges = true;
-            const saveBtn = document.getElementById('saveSettingsBtn');
-            if (saveBtn) {
-                saveBtn.classList.add('btn-warning');
-                saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Settings (Unsaved)';
-            }
-
-            showNotification(`${data.title} updated (Pending Save)`, 'info');
+            showNotification(`${schedule.display_name} saved successfully`, 'success');
             closeModal('editRateModal');
 
-            // Reset button state
-            btnUpdate.innerHTML = originalText;
-            btnUpdate.disabled = false;
+            if (typeof loadSystemSettingsIntoForm === 'function') {
+                loadSystemSettingsIntoForm();
+            }
+
+            if (window.dbOperations.loadDashboardStats) window.dbOperations.loadDashboardStats();
+
         } catch (error) {
-            console.error('Failed to update rates:', error);
-            showNotification('Failed to update rates', 'error');
+            console.error('Error updating rates:', error);
+            showNotification('Failed to save changes: ' + error.message, 'error');
             btnUpdate.innerHTML = originalText;
             btnUpdate.disabled = false;
         }
@@ -2036,12 +2437,20 @@ window.showEditRateModal = function (category) {
 
 // Initialize edit rate buttons
 function initializeRateEditing() {
-    document.querySelectorAll('.btn-edit-rate').forEach(btn => {
-        btn.addEventListener('click', () => {
+    // Clean up old listeners if any (by using delegation we don't need to loop)
+    if (window.isRateEditingInitialized) return;
+    
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn-edit-rate');
+        if (btn) {
             const category = btn.getAttribute('data-category');
-            showEditRateModal(category);
-        });
+            if (category && typeof window.showEditRateModal === 'function') {
+                window.showEditRateModal(category);
+            }
+        }
     });
+
+    window.isRateEditingInitialized = true;
 }
 
 // === NOTIFICATIONS LOGIC ===
@@ -2106,11 +2515,18 @@ async function loadNotifications() {
         }
 
         list.innerHTML = data.map(n => {
-            const iconSvg = n.type === 'cutoff_done' 
-                ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M4.93 19.07L19.07 4.93"/></svg>` 
-                : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
+            let iconSvg, iconClass;
             
-            const iconClass = n.type === 'cutoff_done' ? 'cutoff-done' : 'default';
+            if (n.type === 'cutoff_done') {
+                iconSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M4.93 19.07L19.07 4.93"/></svg>`;
+                iconClass = 'cutoff-done';
+            } else if (n.type === 'activation_ready') {
+                iconSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+                iconClass = 'activation-ready';
+            } else {
+                iconSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
+                iconClass = 'default';
+            }
             
             return `
                 <div class="notification-item ${n.is_read ? '' : 'unread'}" 
@@ -2194,3 +2610,115 @@ function formatTimeAgo(date) {
     if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
     return date.toLocaleDateString();
 }
+
+/**
+ * Opens the Edit Reading Modal
+ * Refactored to support customer-centric reading list
+ */
+window.editReading = function(id, prev, current, name, meterNo, customerId) {
+    const modal = document.getElementById('editReadingModal');
+    if (!modal) return;
+
+    const periodFilter = document.getElementById('readingListPeriodFilter');
+    const selectedPeriod = periodFilter ? periodFilter.value : '';
+
+    // Handle initial state - if current is "--" or empty string, show blank
+    const numericCurrent = (current === '--' || current === '') ? '' : current;
+
+    document.getElementById('editReadingBillingId').value = id || '';
+    document.getElementById('editReadingCustomerId').value = customerId || '';
+    document.getElementById('editReadingPeriod').value = selectedPeriod;
+    
+    document.getElementById('editReadingCustomerName').innerText = name;
+    document.getElementById('editReadingMeterNo').innerText = `Meter: ${meterNo}`;
+    document.getElementById('editReadingPrev').value = prev;
+    document.getElementById('editReadingCurrent').value = numericCurrent;
+    
+    // Initial consumption calc
+    const consumption = (numericCurrent !== '' && numericCurrent >= prev) ? (numericCurrent - prev) : 0;
+    document.getElementById('editReadingConsumption').innerText = `${consumption} cu.m.`;
+
+    modal.style.removeProperty('opacity');
+    modal.style.display = 'flex';
+    setTimeout(() => modal.classList.add('active'), 10);
+};
+
+// Initialize Edit Reading Listeners
+document.addEventListener('DOMContentLoaded', () => {
+    const currentInput = document.getElementById('editReadingCurrent');
+    const prevInput = document.getElementById('editReadingPrev');
+    const consumptionDisplay = document.getElementById('editReadingConsumption');
+    const saveBtn = document.getElementById('saveReadingEditBtn');
+
+    if (currentInput && prevInput && consumptionDisplay) {
+        currentInput.addEventListener('input', () => {
+            const current = parseFloat(currentInput.value) || 0;
+            const prev = parseFloat(prevInput.value) || 0;
+            const consumption = Math.max(0, current - prev);
+            consumptionDisplay.innerText = `${consumption} cu.m.`;
+            
+            // Visual feedback if current < prev
+            if (current < prev) {
+                currentInput.style.borderColor = 'var(--red)';
+                consumptionDisplay.style.color = 'var(--red)';
+            } else {
+                currentInput.style.borderColor = '';
+                consumptionDisplay.style.color = '';
+            }
+        });
+    }
+
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            const id = document.getElementById('editReadingBillingId').value;
+            const current = parseFloat(currentInput.value) || 0;
+            const prev = parseFloat(prevInput.value) || 0;
+
+            if (current < prev) {
+                showNotification('Current reading cannot be less than previous reading', 'error');
+                return;
+            }
+
+            // PIN Gate
+            showPINVerifyModal(async () => {
+                const originalText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+                saveBtn.disabled = true;
+
+                try {
+                    const customerId = document.getElementById('editReadingCustomerId').value;
+                    const period = document.getElementById('editReadingPeriod').value;
+
+                    // If NO period is selected, we can't create a new bill
+                    if (!id && !period) {
+                        showNotification('Please select a specific Billing Period/Month first.', 'warning');
+                        return;
+                    }
+
+                    await window.dbOperations.updateReading(id, current, customerId, period);
+                    closeModal('editReadingModal');
+                    
+                    // Refresh current view (Reading List)
+                    const activePage = document.querySelector('.page.active');
+                    if (activePage && activePage.id === 'readingListPage') {
+                        // Re-trigger load with current filters
+                        const activePeriod = document.getElementById('readingListPeriodFilter').value;
+                        const barangay = document.getElementById('readingListBarangayFilter').value;
+                        const search = document.getElementById('readingListSearch').value;
+                        window.dbOperations.loadReadingList({ period: activePeriod, barangay, search });
+                    }
+                    
+                    // Globally refresh related billing data so other tabs are up-to-date
+                    if (typeof refreshBilling === 'function') refreshBilling();
+                    if (typeof refreshLedger === 'function') refreshLedger();
+                    if (typeof window.updateDashboardCharts === 'function') window.updateDashboardCharts();
+                } catch (error) {
+                    // Error handled in dbOperations.updateReading
+                } finally {
+                    saveBtn.innerHTML = originalText;
+                    saveBtn.disabled = false;
+                }
+            });
+        });
+    }
+});
