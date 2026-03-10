@@ -9,27 +9,35 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="shared/common.css">
     <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/png" href="assets/logo.png">
 </head>
 
 <body>
-    <div class="container">
-        <!-- Logo -->
-        <div class="logo-section">
-            <img src="assets/logo.png" alt="Pulupandan Water District Logo" class="logo-icon"
-                style="width: 80px; height: 80px; object-fit: contain;">
-            <div>
-                <h1 class="logo-title">Pulupandan Water District</h1>
-                <p class="logo-subtitle">Water Billing Management</p>
-            </div>
+    <div class="immersive-wrapper">
+        <div class="wave-background">
+            <svg class="waves" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+                viewBox="0 24 150 28" preserveAspectRatio="none" shape-rendering="auto">
+                <defs>
+                    <path id="gentle-wave"
+                        d="M-160 44c30 0 58-18 88-18s 58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z" />
+                </defs>
+                <g class="parallax">
+                    <use xlink:href="#gentle-wave" x="48" y="0" fill="rgba(2, 136, 209, 0.4)" />
+                    <use xlink:href="#gentle-wave" x="48" y="3" fill="rgba(2, 136, 209, 0.3)" />
+                    <use xlink:href="#gentle-wave" x="48" y="5" fill="rgba(2, 136, 209, 0.2)" />
+                    <use xlink:href="#gentle-wave" x="48" y="7" fill="rgba(2, 136, 209, 0.1)" />
+                </g>
+            </svg>
         </div>
-
-        <!-- Login Card -->
-        <div class="login-card">
-            <!-- Unified Login Header -->
-            <div style="text-align: center; margin-bottom: 2rem;">
-                <h2 style="font-size: 1.5rem; font-weight: 600; color: var(--text-primary);">Welcome Back</h2>
-                <p style="color: var(--text-secondary); margin-top: 0.5rem;">Sign in to access your dashboard</p>
-            </div>
+        <div class="container">
+            <div class="login-card">
+                <div class="brand-internal">
+                    <div class="logo-wrapper">
+                        <img src="assets/logo.png" alt="PWD Logo" class="logo">
+                    </div>
+                    <h1>Pulupandan Water District</h1>
+                    <p>Administrative Portal</p>
+                </div>
 
             <!-- Login Form -->
             <form class="login-form" id="loginForm">
@@ -67,13 +75,7 @@
                     </div>
                 </div>
 
-                <div class="form-footer">
-                    <label class="remember-me">
-                        <input type="checkbox" id="rememberMe">
-                        <span>Remember me</span>
-                    </label>
-                    <a href="#" class="forgot-link">Forgot password?</a>
-                </div>
+
 
                 <button type="submit" class="submit-btn">
                     <span>Sign In</span>
@@ -84,21 +86,11 @@
                 </button>
             </form>
 
-            <!-- Trust Badge -->
-            <div class="trust-badge">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M8 1L3 3V7C3 10.5 5.5 13.5 8 15C10.5 13.5 13 10.5 13 7V3L8 1Z" stroke="#00897B"
-                        stroke-width="1.5" stroke-linejoin="round" />
-                    <path d="M6 8L7.5 9.5L10 6.5" stroke="#00897B" stroke-width="1.5" stroke-linecap="round"
-                        stroke-linejoin="round" />
-                </svg>
-                <span>Secured with 256-bit SSL encryption</span>
-            </div>
         </div>
 
         <!-- Footer -->
         <footer class="footer">
-            <p>&copy; 2026 Pulupandan Water District. All rights reserved.</p>
+            <p>&copy; 2026 Pulupandan Water District.</p>
         </footer>
     </div>
 
