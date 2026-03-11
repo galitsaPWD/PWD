@@ -98,7 +98,7 @@ async function loadCustomers(options = {}) {
                 <td>
                     <div class="action-buttons">
                         <button class="btn-icon" title="Edit"><i class="fas fa-edit"></i></button>
-                        <button class="btn-icon delete" title="Delete" ${c.status === 'inactive' ? 'disabled' : ''}><i class="fas fa-trash"></i></button>
+                        <button class="btn-icon delete" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
                 </td>` : ''}
             </tr>
@@ -495,7 +495,7 @@ async function loadBilling(filters = {}) {
         const customerIds = [...new Set(bills.map(b => b.customer_id))];
         const { data: customers, error: customerError } = await supabase
             .from('customers')
-            .select('id, first_name, last_name, middle_initial, meter_number, address, status, disconnection_date')
+            .select('id, first_name, last_name, middle_initial, meter_number, address, status, disconnection_date, has_discount')
             .in('id', customerIds);
 
         if (customerError) throw customerError;
@@ -670,7 +670,7 @@ async function loadBilling(filters = {}) {
                 <td class="col-customer">
                         <div class="customer-column">
                             <span class="customer-name">${customerName}</span>
-                            ${customer?.has_discount ? '<span class="discount-pill" title="Senior Citizen Discount Active">SC</span>' : ''}
+                            ${customer?.has_discount ? '<span class="badge sc" title="Senior Citizen Discount Active">SC</span>' : ''}
                             ${isInactive ? '<span class="badge-deactivated">DEACTIVATED</span>' : ''}
                             <div class="customer-meta">
                                 <span class="customer-acc-id mono" style="color: var(--text-light); font-size: 0.75rem;">${getAccountID(customer?.id)}</span>
@@ -1720,13 +1720,13 @@ async function loadLedgerCard(customerId) {
  * NOW: Bill-centric (shows only readed customers) with Latest-First sorting
  */
 async function loadReadingList(options = {}) {
-    const { period = '', barangay = '', readerId = '', status = '', search = '', sortBy = 'updated_at', sortOrder = 'desc' } = options;
+    const { period = '', barangay = '', readerId = '', status = '', search = '', sortBy = 'id', sortOrder = 'desc' } = options;
 
     const tbody = document.getElementById('readingListTableBody');
     if (!tbody) return;
 
     try {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 3rem; color: #9E9E9E;"><i class="fas fa-spinner fa-spin"></i> Loading readings...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 3rem; color: #9E9E9E;"><i class="fas fa-spinner fa-spin"></i> Loading readings...</td></tr>';
 
         // 1. Fetch Billings primarily
         let query = supabase
@@ -1752,7 +1752,7 @@ async function loadReadingList(options = {}) {
         if (bError) throw bError;
 
         if (!bills || bills.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 3rem; color: #9E9E9E;">No readings found matching filters.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 3rem; color: #9E9E9E;">No readings found matching filters.</td></tr>`;
             return;
         }
 
@@ -1807,40 +1807,6 @@ async function loadReadingList(options = {}) {
             );
         }
 
-        if (status) {
-            const settings = await loadSystemSettings();
-            const cutoffGrace = settings ? (settings.cutoff_grace_period || settings.cutoff_days || 30) : 30;
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-
-            finalRenderedList = finalRenderedList.filter(item => {
-                const s = item.status.toLowerCase();
-                const cs = (item.customer_status || 'active').toLowerCase();
-                
-                if (status === 'paid') return s === 'paid';
-                if (status === 'unpaid') return s === 'unpaid';
-                
-                if (status === 'overdue') {
-                    if (s !== 'overdue' && s !== 'unpaid') return false;
-                    return item.due_date && new Date(item.due_date) < today;
-                }
-
-                if (status === 'cutoff') {
-                    if (s !== 'overdue' && s !== 'unpaid' || !item.due_date) return false;
-                    const dueDate = new Date(item.due_date);
-                    dueDate.setHours(0, 0, 0, 0);
-                    const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
-                    return diffDays >= cutoffGrace;
-                }
-
-                if (status === 'disconnected') {
-                    return cs === 'inactive' || cs === 'disconnected' || (item.disconnection_bill_id === item.billingId);
-                }
-                
-                return true;
-            });
-        }
-
         // 4. Client-side Sort
         finalRenderedList.sort((a, b) => {
             let valA, valB;
@@ -1893,7 +1859,6 @@ async function loadReadingList(options = {}) {
                 <td><div class="barangay-display" title="${item.address}">${item.barangay}</div></td>
                 <td class="activity-date">${item.date}</td>
                 <td class="mono">${item.meterNo || '--'}</td>
-                <td><span class="badge status-${statusClass}">${displayStatus}</span></td>
                 <td>
                     <button class="btn-icon" title="Edit Reading" 
                             onclick="window.editReading('${item.billingId}', ${item.prev}, '${item.curr}', '${item.fullName.replace(/'/g, "\\'")}', '${item.meterNo}', ${item.customerId})">
@@ -1906,7 +1871,7 @@ async function loadReadingList(options = {}) {
 
     } catch (error) {
         console.error('Error loading reading list:', error);
-        tbody.innerHTML = `<tr><td colspan="9" class="text-danger center">Failed to load reading list: ${error.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-danger center">Failed to load reading list: ${error.message}</td></tr>`;
     }
 }
 
@@ -2058,7 +2023,7 @@ async function loadRecentReadingsWidget() {
                     id, first_name, last_name, meter_number
                 )
             `)
-            .order('updated_at', { ascending: false })
+            .order('id', { ascending: false })
             .limit(10);
 
         if (error) throw error;

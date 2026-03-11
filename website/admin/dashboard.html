@@ -15,11 +15,6 @@
 </head>
 
 <body>
-    <!-- Custom Print Header (Only visible on print) -->
-    <div class="custom-print-header">
-        <h1>Pulupandan Water District</h1>
-    </div>
-
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay">
         <div class="loading-content">
@@ -703,17 +698,6 @@
                                 <option value="">All Barangays</option>
                             </select>
                         </div>
-                        <div class="filter-item" style="flex: 1;">
-                            <label>Status</label>
-                            <select id="readingListStatusFilter" class="filter-select">
-                                <option value="">All Status</option>
-                                <option value="paid">Paid</option>
-                                <option value="unpaid">Unpaid</option>
-                                <option value="overdue">Overdue</option>
-                                <option value="cutoff">For Cutoff</option>
-                                <option value="disconnected">Disconnected</option>
-                            </select>
-                        </div>
                     </div>
                     <div class="filter-item" style="margin-left: auto;">
                         <label style="visibility: hidden;">Action</label>
@@ -757,13 +741,12 @@
                                     <th id="sortReadingDate" data-sort-key="updated_at">Date Read <i
                                             class="fas fa-sort sort-icon"></i></th>
                                     <th>Meter No</th>
-                                    <th>Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="readingListTableBody">
                                 <tr>
-                                    <td colspan="9" style="text-align: center; padding: 3rem; color: #9E9E9E;">
+                                    <td colspan="8" style="text-align: center; padding: 3rem; color: #9E9E9E;">
                                         <i class="fas fa-spinner fa-spin"
                                             style="font-size: 2rem; margin-bottom: 1rem; display: block; opacity: 0.3;"></i>
                                         Loading readings...

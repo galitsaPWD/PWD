@@ -1021,6 +1021,13 @@ td .badge[class*="status-"] {
     font-weight: 700;
 }
 
+.badge.sc {
+    background-color: rgba(33, 150, 243, 0.15);
+    color: #0D47A1;
+    font-weight: 800;
+    border: 1px solid rgba(33, 150, 243, 0.2);
+}
+
 .name-column {
     display: flex;
     flex-direction: column;
@@ -2020,7 +2027,7 @@ body.dark-theme .meter-number {
 }
 
 .ledger-card-paper {
-    background: #FFFBE6;
+    background: #FFFFFF;
     /* Creamy paper color */
     color: #1A1A1A;
     padding: 3rem;
@@ -2028,7 +2035,7 @@ body.dark-theme .meter-number {
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
     max-width: 1000px;
     margin: 0 auto;
-    border: 1px solid #E5E1C9;
+    border: 1px solid #E2E8F0;
     position: relative;
     min-height: 1000px;
 }
@@ -2222,36 +2229,41 @@ body.dark-theme .meter-number {
 
 @media print {
 
-    /* Remove browser default headers/footers (date, title, URL, page numbers) */
+    /* Master Ledger & Ledger Card Printing - Hard Reset */
     @page {
         margin: 0;
+        size: auto;
     }
 
+    html,
     body.printing-ledger {
-        padding: 0 !important;
+        display: block !important;
+        height: auto !important;
         margin: 0 !important;
+        padding: 0 !important;
         background: white !important;
-        box-sizing: border-box !important;
-    }
-
-    /* Base: Hide everything (ledger only) */
-    body.printing-ledger * {
-        visibility: hidden !important;
         overflow: visible !important;
     }
 
-    /* Show Custom Branding only if MASTER View is Active */
-    body.printing-ledger #ledgerMasterView[style*="display: block"]~.custom-print-header,
-    body.printing-ledger #ledgerMasterView[style*="display: block"]~.custom-print-footer,
+    /* Hide everything by default, then selectively show */
+    body.printing-ledger .sidebar,
+    body.printing-ledger .header,
+    body.printing-ledger .filter-bar,
+    body.printing-ledger .no-print,
+    body.printing-ledger .btn,
+    body.printing-ledger .mobile-menu-btn {
+        display: none !important;
+    }
+
+    /* Branding: Show common header only for reports, not for High-Fidelity Cards */
+    body.printing-ledger .custom-print-header,
     body.printing-ledger .custom-print-footer {
-        visibility: visible !important;
         display: block !important;
     }
 
-    /* Specific Header for Master View */
-    body.printing-ledger #ledgerMasterView[style*="display: block"] .print-only-header {
-        visibility: visible !important;
-        display: block !important;
+    /* Keep individual card's professional branding clean */
+    body.printing-ledger-card .custom-print-header {
+        display: none !important;
     }
 
     /* Active View Visibility */
@@ -2360,6 +2372,7 @@ body.dark-theme .meter-number {
 
     body.printing-ledger .ledger-card-container,
     body.printing-ledger .ledger-card-table-wrapper {
+        display: block !important;
         padding: 0 !important;
         margin: 0 !important;
         border: none !important;
@@ -2373,7 +2386,7 @@ body.dark-theme .meter-number {
         box-shadow: none !important;
         border: none !important;
         margin: 0 !important;
-        padding: 1.5cm 1cm !important;
+        padding: 1cm 1cm 1cm 0.5cm !important; /* Shifting content slightly left */
         width: 100% !important;
         max-width: none !important;
         min-height: auto !important;
@@ -2389,6 +2402,8 @@ body.dark-theme .meter-number {
     body.printing-ledger .ledger-card-table td {
         border: 1px solid #000 !important;
         color: #000 !important;
+        font-size: 8.5pt !important;
+        padding: 4px !important;
     }
 }
 

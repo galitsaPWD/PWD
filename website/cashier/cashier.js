@@ -666,7 +666,7 @@ async function loadBilling() {
         const [billsRes, settingsRes, customersRes] = await Promise.all([
             supabase.from('billing').select('*').order('id', { ascending: false }),
             window.cashierDb.loadSystemSettings(),
-            supabase.from('customers').select('id, first_name, last_name, meter_number, address, status, disconnection_bill_id')
+            supabase.from('customers').select('id, first_name, last_name, meter_number, address, status, disconnection_bill_id, has_discount')
         ]);
 
         const bills = billsRes.data;
@@ -786,6 +786,7 @@ async function loadBilling() {
                     <td>
                         <div class="customer-column">
                             <span class="customer-name">${customer.last_name}, ${customer.first_name}</span>
+                            ${customer.has_discount ? '<span class="badge sc" title="Senior Citizen">SC</span>' : ''}
                             ${isInactive ? '<span class="badge-deactivated">DEACTIVATED</span>' : ''}
                             <div class="customer-meta">
                                 <span class="customer-acc-id mono" style="color: var(--text-light); font-size: 0.75rem;">${getAccountID(customer.id)}</span>
@@ -1381,8 +1382,16 @@ function initializeLedgerPage() {
                 printDate.textContent = `Generated on: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Manila' })}`;
             }
             document.body.classList.add('printing-ledger');
+            
+            // If viewing an individual card, add a specific class to handle card-only print styles
+            const isDetailView = document.getElementById('ledgerDetailView').style.display === 'block';
+            if (isDetailView) {
+                document.body.classList.add('printing-ledger-card');
+            }
+            
             window.print();
             document.body.classList.remove('printing-ledger');
+            document.body.classList.remove('printing-ledger-card');
         };
     }
 

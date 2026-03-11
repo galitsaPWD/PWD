@@ -1,6 +1,6 @@
 // Admin Dashboard JavaScript
 let customerSortConfig = { key: 'id', order: 'asc' };
-let readingListSortConfig = { key: 'updated_at', order: 'desc' };
+let readingListSortConfig = { key: 'id', order: 'desc' };
 let currentLedgerCustomerId = null; // Track which customer's ledger is open
 
 function initializeSorting() {
@@ -450,7 +450,6 @@ function initializeReadingListPage() {
     const searchInput = document.getElementById('readingListSearch');
     const periodFilter = document.getElementById('readingListPeriodFilter');
     const barangayFilter = document.getElementById('readingListBarangayFilter');
-    const statusFilter = document.getElementById('readingListStatusFilter');
     const readerFilter = document.getElementById('readingListReaderFilter');
     const printBtn = document.getElementById('printReadingListBtn');
 
@@ -462,7 +461,6 @@ function initializeReadingListPage() {
         const period = periodFilter?.value || '';
         const readerId = readerFilter?.value || '';
         const barangay = barangayFilter?.value || '';
-        const status = statusFilter?.value || '';
         const search = searchInput?.value || '';
 
         let targetBarangays = [];
@@ -482,7 +480,6 @@ function initializeReadingListPage() {
             period,
             barangay,
             readerId,
-            status, // Pass status to database operation
             search,
             sortBy: readingListSortConfig.key,
             sortOrder: readingListSortConfig.order
@@ -512,7 +509,6 @@ function initializeReadingListPage() {
     searchInput?.addEventListener('input', debounce(updateList, 300));
     periodFilter?.addEventListener('change', updateList);
     readerFilter?.addEventListener('change', updateList);
-    statusFilter?.addEventListener('change', updateList);
     
     barangayFilter?.addEventListener('change', async () => {
         const barangay = barangayFilter.value;
@@ -2117,14 +2113,31 @@ function initializeLedgerPage() {
         if (printDate) {
             printDate.textContent = `Generated on: ${formatLocalDateTime(new Date())}`;
         }
+        
+        // Add printing class to body for specialized CSS
+        document.body.classList.add('printing-ledger');
+        
+        // If viewing an individual card, add a specific class to handle card-only print styles
+        const isDetailView = document.getElementById('ledgerDetailView').style.display === 'block';
+        if (isDetailView) {
+            document.body.classList.add('printing-ledger-card');
+        }
+        
         window.print();
+        
+        // Clean up
+        document.body.classList.remove('printing-ledger');
+        document.body.classList.remove('printing-ledger-card');
     };
 
     // Detail View Controls
     const closeDetail = () => {
         document.getElementById('ledgerMasterView').style.display = 'block';
         document.getElementById('ledgerDetailView').style.display = 'none';
-        document.querySelector('.ledger-controls').style.display = 'block';
+        
+        // Show filter elements
+        document.querySelectorAll('.ledger-controls .search-box, .ledger-controls .filter-select').forEach(el => el.style.display = 'block');
+        
         document.getElementById('backToMasterBtn').style.display = 'none';
         document.getElementById('printLedgerBtn').innerHTML = '<i class="fas fa-print"></i> Print Report';
     };
@@ -2147,11 +2160,11 @@ window.viewCustomerLedger = async function (customerId) {
     document.getElementById('ledgerMasterView').style.display = 'none';
     document.getElementById('ledgerDetailView').style.display = 'block';
 
-    // Hide master filters
-    document.querySelector('.ledger-controls').style.display = 'none';
+    // Hide only filter elements (search, selects), keep buttons visible
+    document.querySelectorAll('.ledger-controls .search-box, .ledger-controls .filter-select').forEach(el => el.style.display = 'none');
 
     // Show back button and update Print Button
-    document.getElementById('backToMasterBtn').style.display = 'inline-block';
+    document.getElementById('backToMasterBtn').style.display = 'inline-flex';
     document.getElementById('printLedgerBtn').innerHTML = '<i class="fas fa-print"></i> Print Customer Card';
 
     // Set current tracking ID for realtime refresh

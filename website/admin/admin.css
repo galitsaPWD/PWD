@@ -1162,6 +1162,13 @@ body {
     border: 1px solid rgba(33, 150, 243, 0.1);
 }
 
+.badge.sc {
+    background-color: rgba(33, 150, 243, 0.15);
+    color: #0D47A1;
+    font-weight: 800;
+    border: 1px solid rgba(33, 150, 243, 0.2);
+}
+
 /* === BUTTONS === */
 .btn {
     display: inline-flex;
@@ -4315,6 +4322,141 @@ tr.status-inactive .customer-meta {
         border: none !important;
         opacity: 1 !important;
         visibility: visible !important;
+    }
+
+    /* Master Ledger & Ledger Card Printing - Hard Reset */
+    @page {
+        margin: 0;
+        size: auto;
+    }
+
+    html,
+    body.printing-ledger {
+        display: block !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: white !important;
+        overflow: visible !important;
+    }
+
+    /* Hide everything by default, then selectively show */
+    body.printing-ledger .sidebar,
+    body.printing-ledger .header,
+    body.printing-ledger #mainHeader,
+    body.printing-ledger .filter-bar,
+    body.printing-ledger .no-print,
+    body.printing-ledger .btn,
+    body.printing-ledger .mobile-menu-btn,
+    body.printing-ledger .page:not(#ledgerPage) {
+        display: none !important;
+    }
+
+    /* Branding: Show common header only for reports, not for High-Fidelity Cards */
+    body.printing-ledger .custom-print-header,
+    body.printing-ledger .custom-print-footer {
+        display: block !important;
+    }
+
+    /* Keep individual card's professional branding clean */
+    body.printing-ledger-card .custom-print-header {
+        display: none !important;
+    }
+
+    /* Container Resets */
+    body.printing-ledger .admin-container,
+    body.printing-ledger .main-content,
+    body.printing-ledger .page-content,
+    body.printing-ledger #ledgerPage {
+        display: block !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        left: 0 !important;
+        position: static !important;
+        height: auto !important;
+        min-height: 0 !important;
+    }
+
+    /* If we are in detail view, hide the master view to avoid space issues */
+    body.printing-ledger-card #ledgerMasterView {
+        display: none !important;
+    }
+
+    /* If we are in master view, hide the detail view */
+    body.printing-ledger:not(.printing-ledger-card) #ledgerDetailView {
+        display: none !important;
+    }
+
+    body.printing-ledger .custom-print-header {
+        position: fixed;
+        width: 100%;
+        top: 0;
+        left: 0;
+        text-align: center;
+        border-bottom: 2px solid #000;
+        padding: 0.5cm 0;
+        z-index: 9999;
+    }
+
+    body.printing-ledger .custom-print-footer {
+        display: block;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 0.75rem;
+        color: #666;
+        border-top: 1px solid #eee;
+        padding: 0.5cm 0;
+        background: white;
+    }
+
+    body.printing-ledger .ledger-card-container {
+        padding: 0 !important;
+        margin: 0 !important;
+        display: block !important;
+        width: 100% !important;
+        background: white !important;
+    }
+
+    body.printing-ledger .data-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
+
+    body.printing-ledger .data-table th,
+    body.printing-ledger .data-table td {
+        border: 1px solid #000 !important;
+        padding: 8px !important;
+        color: #000 !important;
+    }
+
+    body.printing-ledger .ledger-card-paper {
+        background: white !important;
+        box-shadow: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 1cm 1cm 1cm 0.5cm !important; /* Shifting content slightly left */
+        width: 100% !important;
+        max-width: none !important;
+        box-sizing: border-box !important;
+        min-height: auto !important;
+    }
+
+    body.printing-ledger .ledger-card-table {
+        border: 2px solid #000 !important;
+        width: 100% !important;
+        table-layout: auto !important;
+    }
+
+    body.printing-ledger .ledger-card-table th,
+    body.printing-ledger .ledger-card-table td {
+        border: 1px solid #000 !important;
+        color: #000 !important;
+        font-size: 8.5pt !important;
+        padding: 4px !important;
     }
 }
 
