@@ -64,64 +64,205 @@ section {
     }
 }
 
-/* Auth Section (Login) */
+/* === Native App-Style Immersive Login === */
 #auth-section {
-    background: var(--header-gradient);
+    background: white;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
+    flex-direction: column;
+    height: 100vh;
+    width: 100vw;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 9999;
 }
 
 .login-container {
-    background: var(--white);
-    border-radius: var(--border-radius);
-    padding: 40px 30px;
+    height: 100%;
     width: 100%;
-    max-width: 420px;
-    box-shadow: var(--shadow-strong);
-    position: relative;
-    overflow: hidden;
-}
-
-.login-container::before {
-    content: '';
-    position: absolute;
-    top: -50px;
-    right: -50px;
-    width: 150px;
-    height: 150px;
-    background: var(--primary-light);
-    opacity: 0.1;
-    border-radius: 50%;
+    max-width: none;
+    background: white;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+    border: none;
+    display: flex;
+    flex-direction: column;
 }
 
 .brand {
+    background: linear-gradient(135deg, #651FFF 0%, #7C4DFF 100%);
+    padding: 80px 40px 140px;
     text-align: center;
-    margin-bottom: 40px;
+    position: relative;
+    z-index: 10;
+    overflow: hidden;
 }
 
-.logo {
-    width: 100px;
+.wave-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
     height: 100px;
-    object-fit: contain;
-    margin-bottom: 20px;
-    filter: drop-shadow(0 5px 15px rgba(0, 0, 0, 0.1));
+    z-index: 1;
+}
+
+.waves {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    margin-bottom: -7px; /* Fix for safari gap */
+    min-height: 100px;
+}
+
+/* Wave Animation */
+.parallax > use {
+    animation: move-forever 25s cubic-bezier(.55,.5,.45,.5) infinite;
+}
+.parallax > use:nth-child(1) {
+    animation-delay: -2s;
+    animation-duration: 7s;
+}
+.parallax > use:nth-child(2) {
+    animation-delay: -3s;
+    animation-duration: 10s;
+}
+.parallax > use:nth-child(3) {
+    animation-delay: -4s;
+    animation-duration: 13s;
+}
+.parallax > use:nth-child(4) {
+    animation-delay: -5s;
+    animation-duration: 20s;
+}
+
+@keyframes move-forever {
+    0% {
+        transform: translate3d(-90px, 0, 0);
+    }
+    100% {
+        transform: translate3d(85px, 0, 0);
+    }
+}
+
+.logo-wrapper {
+    width: 120px;
+    height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 30px;
+    position: relative;
+    z-index: 2;
+}
+
+.logo-wrapper .logo {
+    width: 130px;
+    height: 130px;
+    filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.25));
 }
 
 .brand h1 {
-    font-size: 32px;
-    font-weight: 800;
-    color: var(--primary-dark);
-    letter-spacing: -1px;
+    font-size: 36px;
+    font-weight: 900;
+    color: white;
+    letter-spacing: -1.5px;
+    margin-bottom: 8px;
+    position: relative;
+    z-index: 2;
 }
 
 .brand p {
-    color: var(--text-muted);
-    font-weight: 500;
-    font-size: 15px;
-    margin-top: 5px;
+    font-size: 16px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    position: relative;
+    z-index: 2;
 }
+
+.auth-form {
+    flex: 1;
+    background: white;
+    padding: 60px 40px 40px; /* Reduced padding-top as waves take some space */
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 15px;
+    position: relative;
+    margin-top: -20px; /* Overlap with waves slightly */
+}
+
+.input-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.input-wrapper .icon {
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 18px;
+    color: var(--primary);
+    opacity: 0.6;
+    transition: all 0.3s ease;
+    z-index: 5;
+}
+
+.input-wrapper .input-field {
+    background: #F8F9FE !important;
+    border: 1px solid #EDEDF5 !important;
+    border-radius: 24px !important;
+    padding: 20px 20px 20px 58px !important; /* Proper padding for internal icon */
+    font-size: 17px !important;
+    color: #1A1A1A !important;
+    width: 100%;
+}
+
+.input-wrapper:focus-within .input-field {
+    background: white !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 10px 20px rgba(124, 77, 255, 0.08) !important;
+}
+
+.input-wrapper:focus-within .icon {
+    opacity: 1;
+    transform: translateY(-50%) scale(1.1);
+}
+
+.btn-primary {
+    margin-top: 25px;
+    height: 65px;
+    background: linear-gradient(135deg, #651FFF 0%, #7C4DFF 100%) !important;
+    border-radius: 24px !important;
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    letter-spacing: 1px !important;
+    color: white !important;
+    border: none !important;
+    box-shadow: 0 15px 30px rgba(101, 31, 255, 0.3) !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.login-footer {
+    padding: 20px 40px 40px;
+    background: white;
+    text-align: center;
+}
+
+.login-footer p {
+    font-size: 11px;
+    font-weight: 700;
+    color: #94A3B8;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    opacity: 0.8;
+}
+
 
 /* Dashboard UI */
 .app-header-home {
@@ -1785,3 +1926,4 @@ section {
     50% { opacity: 0.5; transform: scale(0.9); }
     100% { opacity: 1; transform: scale(1); }
 }
+

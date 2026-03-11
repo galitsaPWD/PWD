@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wb-reader-v28'; // Custom SVG Navigation
+const CACHE_NAME = 'wb-reader-v29'; // Updated to force iREAD H₂O rename
 const ASSETS = [
     './',
     './index.html',

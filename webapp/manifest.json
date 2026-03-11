@@ -1,6 +1,6 @@
 {
-  "name": "Water Baby Reader",
-  "short_name": "WB Reader",
+  "name": "iREAD H₂O",
+  "short_name": "iREAD H₂O",
   "description": "Progressive Web App for Pulupandan Water District Meter Readers",
   "start_url": "./index.html",
   "display": "standalone",

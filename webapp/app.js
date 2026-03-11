@@ -914,9 +914,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
         return;
     }
 
-    const overdueDays = systemSettings ? (parseInt(systemSettings.cutoff_days || 14)) : 14;
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + overdueDays);
+    const dueDate = new Date(readingDate);
+    dueDate.setDate(dueDate.getDate() + 14);
     const dueDateStr = dueDate.toISOString().split('T')[0];
 
     try {
@@ -1030,7 +1029,7 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
             cons: consumption,
             charges: charges,
             arrears: arrears,
-            total: totalDue,
+            total: totalDue + penalty,
             penalty: penalty,
             penaltyPerc: penaltyPerc,
             due: dueDateStr,
@@ -1074,7 +1073,7 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
             cons: consumption,
             charges: charges,
             arrears: arrears,
-            total: totalDue,
+            total: totalDue + penalty,
             penalty: penalty,
             penaltyPerc: penaltyPerc,
             due: dueDateStr,
@@ -1251,38 +1250,53 @@ window.shareReceipt = async () => {
     const data = window.lastReceiptData;
     if (!data) return;
 
+    const penaltyAmount = data.penalty || 0;
+    
+    // Safely format the previous date, avoiding "Invalid Date"
+    const prevDateParsed = data.prevDate ? new Date(data.prevDate) : null;
+    const prevDateStr = (prevDateParsed && !isNaN(prevDateParsed)) ? prevDateParsed.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : 'N/A';
+    const presDateStr = new Date(data.currentDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
     const text = `
+--------------------------------
 PULUPANDAN WATER DISTRICT
-Digital Meter Receipt
----------------------------
-Reference: ${data.receiptNo}
+Official Water Bill
+--------------------------------
 Date: ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
-Customer: ${data.name}
-Brgy: ${data.barangay || 'N/A'}
-Meter: ${data.meter}
----------------------------
-Prev Reading: ${data.prev}
-(${new Date(data.prevDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })})
-Pres Reading: ${data.pres}
-(${new Date(data.currentDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })})
-Cons: ${data.cons} cu.m.
----------------------------
-Arrears: P${(data.arrears || 0).toFixed(2)}
-Current: P${(data.charges.total || 0).toFixed(2)}
-${data.charges.discount > 0 ? `Discount: -P${data.charges.discount.toFixed(2)}\n` : ''}TOTAL DUE: P${data.total.toFixed(2)}
----------------------------
-Penalty: P${(data.penalty || 0).toFixed(2)}
-After Due: P${(data.total + (data.penalty || 0)).toFixed(2)}
-DUE DATE: ${new Date(data.due).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
----------------------------
-Reader: ${data.readerName}
-Thank you!
+Reference: ${data.receiptNo}
+--------------------------------
+CUSTOMER DETAILS
+--------------------------------
+Name: ${data.name}
+Account No: ${data.meter}
+Period: ${presDateStr}
+--------------------------------
+CONSUMPTION (cu.m.)
+--------------------------------
+Prev: ${data.prev} (${prevDateStr})
+Pres: ${data.pres} (${presDateStr})
+Consumed (cons): ${data.cons} cu.m.
+--------------------------------
+CHARGES BREAKDOWN
+--------------------------------
+Arrears:         P${(data.arrears || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+Current Charges: P${(data.charges.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+${data.charges.discount > 0 ? `Discount:       -P${data.charges.discount.toLocaleString(undefined, { minimumFractionDigits: 2 })}\n` : ''}Late Penalty (20%): P${penaltyAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+--------------------------------
+TOTAL AMOUNT DUE:P${data.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+--------------------------------
+Due Date: ${new Date(data.due).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
+--------------------------------
+Reader: ${data.readerName || 'Reader'}
+
+Thank you for being a 
+valued customer!
     `.trim();
 
     if (navigator.share) {
         try {
             await navigator.share({
-                title: 'Meter Receipt',
+                title: 'Official Water Bill',
                 text: text
             });
             showToast('Shared to printer app', 'success');
@@ -1301,35 +1315,50 @@ window.directPrint = () => {
     if (!data) return;
 
     const penaltyAmount = data.penalty || 0;
-    const amountAfterDue = data.total + penaltyAmount;
+    
+    // Safely format the previous date, avoiding "Invalid Date"
+    const prevDateParsed = data.prevDate ? new Date(data.prevDate) : null;
+    const prevDateStr = (prevDateParsed && !isNaN(prevDateParsed)) ? prevDateParsed.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : 'N/A';
+    const presDateStr = new Date(data.currentDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 
     const text = `
+--------------------------------
 PULUPANDAN WATER DISTRICT
-Digital Meter Receipt
----------------------------
+Official Water Bill
+--------------------------------
+Date: ${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
 Reference: ${data.receiptNo}
-Date: ${new Date().toLocaleDateString()}
-Customer: ${data.name}
-Brgy: ${data.barangay || 'N/A'}
-Meter: ${data.meter}
----------------------------
-Prev: ${data.prev}
-Pres: ${data.pres}
-Cons: ${data.cons} cu.m.
----------------------------
-Arrears: P${(data.arrears || 0).toFixed(2)}
-Current: P${(data.charges.total || 0).toFixed(2)}
-TOTAL DUE: P${data.total.toFixed(2)}
----------------------------
-Penalty (${data.penaltyPerc}%): P${penaltyAmount.toFixed(2)}
-After Due: P${amountAfterDue.toFixed(2)}
-DUE DATE: ${data.due}
----------------------------
-Reader: ${data.readerName}
-Thank you!
+--------------------------------
+CUSTOMER DETAILS
+--------------------------------
+Name: ${data.name}
+Account No: ${data.meter}
+Period: ${presDateStr}
+--------------------------------
+CONSUMPTION (cu.m.)
+--------------------------------
+Prev: ${data.prev} (${prevDateStr})
+Pres: ${data.pres} (${presDateStr})
+Consumed (cons): ${data.cons} cu.m.
+--------------------------------
+CHARGES BREAKDOWN
+--------------------------------
+Arrears:         P${(data.arrears || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+Current Charges: P${(data.charges.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+${data.charges.discount > 0 ? `Discount:       -P${data.charges.discount.toLocaleString(undefined, { minimumFractionDigits: 2 })}\n` : ''}Late Penalty (20%): P${penaltyAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+--------------------------------
+TOTAL AMOUNT DUE:P${data.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+--------------------------------
+Due Date: ${new Date(data.due).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
+--------------------------------
+Reader: ${data.readerName || 'Reader'}
+
+Thank you for being a 
+valued customer!
 
 
-`.trim();
+
+    `.trim();
 
     const url = "rawbt:" + encodeURIComponent(text);
     window.location.href = url;
@@ -1361,7 +1390,7 @@ window.showReceiptShortcut = (id) => {
             cons: bill.consumption,
             charges: charges,
             arrears: (customer.arrears || 0) - (bill.balance || 0),
-            total: bill.balance,
+            total: bill.balance + penalty, // Fix: Add penalty to the total balance
             penalty: penalty,
             penaltyPerc: penaltyPerc,
             due: bill.due_date || 'N/A',
