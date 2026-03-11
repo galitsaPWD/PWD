@@ -473,25 +473,9 @@
                         <select id="billingBarangayFilter" class="filter-select">
                             <option value="">All Barangays</option>
                         </select>
-                        <div class="print-dropdown-wrapper" style="position: relative; display: inline-block;">
-                            <button class="btn btn-primary" id="printBillingSummaryBtn" style="margin-left: 0.5rem; display: flex; align-items: center; gap: 8px;">
-                                <i class="fas fa-print"></i> Print Report <i class="fas fa-chevron-down" style="font-size: 0.8rem;"></i>
-                            </button>
-                            <div id="printReportMenu" class="dropdown-menu shadow" style="display: none; position: absolute; right: 0; top: 110%; background: white; border-radius: 8px; z-index: 1000; min-width: 180px; padding: 0.5rem 0;">
-                                <a href="#" class="dropdown-item" data-type="" style="display: block; padding: 0.75rem 1rem; color: #333; text-decoration: none; border-bottom: 2px solid #eee; font-weight: 600;">
-                                    <i class="fas fa-list text-primary" style="margin-right: 8px;"></i> Print Current View
-                                </a>
-                                <a href="#" class="dropdown-item" data-type="overdue" style="display: block; padding: 0.75rem 1rem; color: #333; text-decoration: none; border-bottom: 1px solid #eee;">
-                                    <i class="fas fa-clock text-danger" style="margin-right: 8px;"></i> Print Overdue
-                                </a>
-                                <a href="#" class="dropdown-item" data-type="cutoff" style="display: block; padding: 0.75rem 1rem; color: #333; text-decoration: none; border-bottom: 1px solid #eee;">
-                                    <i class="fas fa-exclamation-triangle text-orange" style="margin-right: 8px;"></i> Print For Cutoff
-                                </a>
-                                <a href="#" class="dropdown-item" data-type="disconnected" style="display: block; padding: 0.75rem 1rem; color: #333; text-decoration: none;">
-                                    <i class="fas fa-unlink text-secondary" style="margin-right: 8px;"></i> Print Disconnected
-                                </a>
-                            </div>
-                        </div>
+                        <button class="btn btn-primary" id="printBillingSummaryBtn" style="margin-left: 0.5rem; display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-print"></i> Print Report
+                        </button>
                     </div>
                 </div>
 
@@ -690,16 +674,7 @@
 
             <!-- Reading List Page -->
             <div class="page" id="readingListPage">
-                <div class="page-header" style="justify-content: space-between; align-items: center;">
-                    <div class="reader-info-display">
-                        <span class="label"
-                            style="font-size: 0.9rem; color: var(--text-light); font-weight: 500;">Assigned
-                            Reader:</span>
-                        <span id="assignedReaderName" class="reader-name"
-                            style="font-size: 1.1rem; font-weight: 600; color: var(--primary); margin-left: 8px;">Not
-                            Assigned</span>
-                    </div>
-                </div>
+                <!-- Header removed for simplicity as requested -->
 
                 <div class="filter-bar">
                     <div class="filter-item" style="flex: 1.5;">
@@ -709,7 +684,13 @@
                             <input type="text" id="readingListSearch" placeholder="Name or account ID...">
                         </div>
                     </div>
-                    <div class="filter-group" style="flex: 2;">
+                    <div class="filter-group" style="flex: 2.5;">
+                        <div class="filter-item" style="flex: 1;">
+                            <label>Reader</label>
+                            <select id="readingListReaderFilter" class="filter-select">
+                                <option value="">All Readers</option>
+                            </select>
+                        </div>
                         <div class="filter-item" style="flex: 1;">
                             <label>Period</label>
                             <select id="readingListPeriodFilter" class="filter-select">
@@ -722,6 +703,17 @@
                                 <option value="">All Barangays</option>
                             </select>
                         </div>
+                        <div class="filter-item" style="flex: 1;">
+                            <label>Status</label>
+                            <select id="readingListStatusFilter" class="filter-select">
+                                <option value="">All Status</option>
+                                <option value="paid">Paid</option>
+                                <option value="unpaid">Unpaid</option>
+                                <option value="overdue">Overdue</option>
+                                <option value="cutoff">For Cutoff</option>
+                                <option value="disconnected">Disconnected</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="filter-item" style="margin-left: auto;">
                         <label style="visibility: hidden;">Action</label>
@@ -731,9 +723,12 @@
                     </div>
                 </div>
 
-                <div class="reading-list-print-header">
-                    <h1 class="print-title">WATER METER READING LIST</h1>
-                    <div class="print-info-grid">
+                <div class="reading-list-print-header ledger-top-branding">
+                    <div class="district-main-header">
+                        <h1>PULUPANDAN WATER DISTRICT</h1>
+                        <h2>WATER METER READING LIST</h2>
+                    </div>
+                    <div class="print-info-grid" style="margin-top: 1.5rem; display: flex; justify-content: space-between; border-top: 1px solid #000; padding-top: 1rem;">
                         <div class="print-info-col">
                             <p><strong>Period:</strong> <span id="printPeriodName">--</span></p>
                         </div>
@@ -747,8 +742,8 @@
                 </div>
 
                 <div id="readingListPrintArea">
-                    <div class="table-container">
-                        <table class="data-table" id="readingListTable">
+                    <div class="table-container" style="overflow-x: auto;">
+                        <table class="data-table" id="readingListTable" style="min-width: 1000px;">
                             <thead>
                                 <tr>
                                     <th id="sortReadingAccount" data-sort-key="id">Acct No <i
@@ -762,12 +757,13 @@
                                     <th id="sortReadingDate" data-sort-key="updated_at">Date Read <i
                                             class="fas fa-sort sort-icon"></i></th>
                                     <th>Meter No</th>
+                                    <th>Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="readingListTableBody">
                                 <tr>
-                                    <td colspan="8" style="text-align: center; padding: 3rem; color: #9E9E9E;">
+                                    <td colspan="9" style="text-align: center; padding: 3rem; color: #9E9E9E;">
                                         <i class="fas fa-spinner fa-spin"
                                             style="font-size: 2rem; margin-bottom: 1rem; display: block; opacity: 0.3;"></i>
                                         Loading readings...

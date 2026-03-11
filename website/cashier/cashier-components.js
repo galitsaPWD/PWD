@@ -231,7 +231,7 @@
 
             const totalDue = parseFloat(bill.balance) + penaltyAmount;
 
-            const cutoffGrace = settings ? (settings.cutoff_days || settings.cutoff_grace_period || 30) : 30;
+            const cutoffGrace = settings ? (settings.cutoff_grace_period || settings.cutoff_days || 30) : 30;
             
             let isForCutoff = false;
             if (bill.due_date) {

@@ -2222,10 +2222,16 @@ body.dark-theme .meter-number {
 
 @media print {
 
-    /* === LEDGER PRINT (only active when body.printing-ledger is set) === */
+    /* Remove browser default headers/footers (date, title, URL, page numbers) */
+    @page {
+        margin: 0;
+    }
+
     body.printing-ledger {
-        padding: 1.5cm 1cm 1.5cm 1cm;
+        padding: 0 !important;
+        margin: 0 !important;
         background: white !important;
+        box-sizing: border-box !important;
     }
 
     /* Base: Hide everything (ledger only) */
@@ -2291,12 +2297,28 @@ body.dark-theme .meter-number {
     }
 
     /* CONTENT POSITIONING */
+    body.printing-ledger .main-content {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        max-width: none !important;
+        left: 0 !important;
+        display: block !important;
+    }
+    
+    body.printing-ledger .page-content {
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
     body.printing-ledger #ledgerMasterView,
     body.printing-ledger #ledgerDetailView {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
+        position: static !important;
         width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        max-width: none !important;
+        left: 0 !important;
     }
 
     /* Data Table (Master) */
@@ -2331,13 +2353,31 @@ body.dark-theme .meter-number {
     }
 
     /* Ledger Card (Detail) optimization */
+    body.printing-ledger #ledgerDetailView {
+        position: static !important;
+        width: 100% !important;
+    }
+
+    body.printing-ledger .ledger-card-container,
+    body.printing-ledger .ledger-card-table-wrapper {
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        background: transparent !important;
+        width: 100% !important;
+        max-width: none !important;
+    }
+
     body.printing-ledger .ledger-card-paper {
         background: white !important;
         box-shadow: none !important;
         border: none !important;
-        padding: 0 !important;
+        margin: 0 !important;
+        padding: 1.5cm 1cm !important;
         width: 100% !important;
+        max-width: none !important;
         min-height: auto !important;
+        box-sizing: border-box !important;
     }
 
     body.printing-ledger .ledger-card-table {
@@ -2541,6 +2581,10 @@ body.dark-theme .meter-number {
 
 /* Print Overrides - scoped to body.printing-invoice to avoid conflicts */
 @media print {
+    @page {
+        margin: 0;
+    }
+
     body.printing-invoice {
         margin: 0 !important;
         padding: 0 !important;

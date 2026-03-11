@@ -53,7 +53,7 @@ async function loadCustomers(options = {}) {
                 getAccountID(c.id).toLowerCase().includes(lowSearch);
 
             const matchesType = !type || (c.customer_type || '').toLowerCase() === type.toLowerCase();
-            const matchesBarangay = !barangay || (c.address || '').toLowerCase().includes(barangay.toLowerCase());
+            const matchesBarangay = !barangay || getBarangay(c.address).toLowerCase() === barangay.toLowerCase();
 
             return matchesSearch && matchesType && matchesBarangay;
         });
@@ -515,15 +515,15 @@ async function loadBilling(filters = {}) {
         if (search) {
             const lowerSearch = search.toLowerCase();
             filteredData = filteredData.filter(b => {
-                const billIdStr = b.id.toString();
-                const formattedBillId = `#BIL-${billIdStr.padStart(4, '0')}`.toLowerCase();
+                const billNoStr = (b.bill_no || b.id).toString();
+                const formattedBillId = `#BIL-${billNoStr.padStart(4, '0')}`.toLowerCase();
                 const customer = b.customers || {};
                 const fullName = `${customer.first_name || ''} ${customer.last_name || ''}`.toLowerCase();
                 const meterNo = (customer.meter_number || '').toLowerCase();
                 const accountId = customer.id ? getAccountID(customer.id).toLowerCase() : '';
 
                 return (
-                    billIdStr.includes(lowerSearch) ||
+                    billNoStr.includes(lowerSearch) ||
                     formattedBillId.includes(lowerSearch) ||
                     fullName.includes(lowerSearch) ||
                     meterNo.includes(lowerSearch) ||
@@ -537,7 +537,7 @@ async function loadBilling(filters = {}) {
         if (window.dbOperations && window.dbOperations.loadSystemSettings) {
             settings = await window.dbOperations.loadSystemSettings();
         }
-        const cutoffGrace = settings ? (settings.cutoff_days || settings.cutoff_grace_period || 30) : 30;
+        const cutoffGrace = settings ? (settings.cutoff_grace_period || settings.cutoff_days || 30) : 30;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
@@ -589,8 +589,8 @@ async function loadBilling(filters = {}) {
         // Apply barangay filter (client-side, on customer address)
         if (barangay) {
             filteredData = filteredData.filter(b => {
-                const address = (b.customers?.address || '').toLowerCase();
-                return address.includes(barangay.toLowerCase());
+                const bBrgy = getBarangay(b.customers?.address);
+                return bBrgy.toLowerCase() === barangay.toLowerCase();
             });
         }
 
@@ -666,7 +666,7 @@ async function loadBilling(filters = {}) {
 
             return `
             <tr class="${isInactive ? 'status-inactive' : ''}" data-id="${bill.id}" data-customer-id="${bill.customer_id}">
-                <td class="bill-id col-bill-id">#BIL-${String(bill.id).padStart(4, '0')}</td>
+                <td class="bill-id col-bill-id">#BIL-${String(bill.bill_no || bill.id).padStart(4, '0')}</td>
                 <td class="col-customer">
                         <div class="customer-column">
                             <span class="customer-name">${customerName}</span>
@@ -1492,8 +1492,7 @@ async function loadMasterLedger(options = {}) {
 
         // 3. Apply client-side filters for barangay, search and period
         let filtered = customers.filter(c => {
-            const address = c.address || '';
-            const matchesBarangay = !barangay || address.toLowerCase().includes(barangay.toLowerCase());
+            const matchesBarangay = !barangay || getBarangay(c.address).toLowerCase() === barangay.toLowerCase();
 
             const lowSearch = search.toLowerCase();
             const fullName = `${c.first_name} ${c.last_name}`.toLowerCase();
@@ -1638,7 +1637,7 @@ async function loadLedgerCard(customerId) {
             runningBalance += parseFloat(b.amount);
             entries.push({
                 date: b.reading_date || b.period_end || b.due_date || b.created_at,
-                billNo: `BIL-${b.id}`,
+                billNo: `BIL-${String(b.bill_no || b.id).padStart(4, '0')}`,
                 others: '',
                 particulars: `Monthly Reading (${b.billing_period})`,
                 reading: b.current_reading,
@@ -1654,7 +1653,7 @@ async function loadLedgerCard(customerId) {
                 runningBalance -= parseFloat(b.amount);
                 entries.push({
                     date: b.payment_date,
-                    billNo: `BIL-${b.id}`,
+                    billNo: b.receipt_no ? `RCP-${new Date(b.payment_date).getFullYear()}-${String(b.receipt_no).padStart(4, '0')}` : `RCP-${new Date(b.payment_date).getFullYear()}-${String(b.id).padStart(4, '0')}`,
                     others: '',
                     particulars: `Cash Payment - Period ${b.billing_period}`,
                     reading: null,
@@ -1721,7 +1720,7 @@ async function loadLedgerCard(customerId) {
  * NOW: Bill-centric (shows only readed customers) with Latest-First sorting
  */
 async function loadReadingList(options = {}) {
-    const { period = '', barangay = '', search = '', sortBy = 'updated_at', sortOrder = 'desc' } = options;
+    const { period = '', barangay = '', readerId = '', status = '', search = '', sortBy = 'updated_at', sortOrder = 'desc' } = options;
 
     const tbody = document.getElementById('readingListTableBody');
     if (!tbody) return;
@@ -1735,7 +1734,7 @@ async function loadReadingList(options = {}) {
             .select(`
                 *,
                 customers!inner (
-                    id, last_name, first_name, middle_initial, address, meter_number, has_discount
+                    id, last_name, first_name, middle_initial, address, meter_number, has_discount, status, disconnection_date, disconnection_bill_id
                 )
             `);
 
@@ -1783,12 +1782,67 @@ async function loadReadingList(options = {}) {
                 usage: b.consumption || 0,
                 date: dateRead,
                 barangay: getBarangay(c.address),
+                status: b.status || 'unpaid',
+                due_date: b.due_date,
+                is_overdue: b.is_overdue || false,
+                customer_status: c.status || 'active',
+                disconnection_bill_id: c.disconnection_bill_id,
                 updated_at: b.updated_at || b.created_at || b.reading_date
             };
         });
 
+        // 3.1 Apply precise client-side barangay/reader filter if specified
+        let finalRenderedList = renderedList;
+        
+        if (readerId) {
+            const readerBarangays = await getBarangaysForReader(readerId);
+            finalRenderedList = renderedList.filter(item => 
+                readerBarangays.some(rb => rb.toLowerCase() === item.barangay.toLowerCase())
+            );
+        }
+
+        if (barangay) {
+            finalRenderedList = finalRenderedList.filter(item => 
+                item.barangay.toLowerCase() === barangay.toLowerCase()
+            );
+        }
+
+        if (status) {
+            const settings = await loadSystemSettings();
+            const cutoffGrace = settings ? (settings.cutoff_grace_period || settings.cutoff_days || 30) : 30;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            finalRenderedList = finalRenderedList.filter(item => {
+                const s = item.status.toLowerCase();
+                const cs = (item.customer_status || 'active').toLowerCase();
+                
+                if (status === 'paid') return s === 'paid';
+                if (status === 'unpaid') return s === 'unpaid';
+                
+                if (status === 'overdue') {
+                    if (s !== 'overdue' && s !== 'unpaid') return false;
+                    return item.due_date && new Date(item.due_date) < today;
+                }
+
+                if (status === 'cutoff') {
+                    if (s !== 'overdue' && s !== 'unpaid' || !item.due_date) return false;
+                    const dueDate = new Date(item.due_date);
+                    dueDate.setHours(0, 0, 0, 0);
+                    const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
+                    return diffDays >= cutoffGrace;
+                }
+
+                if (status === 'disconnected') {
+                    return cs === 'inactive' || cs === 'disconnected' || (item.disconnection_bill_id === item.billingId);
+                }
+                
+                return true;
+            });
+        }
+
         // 4. Client-side Sort
-        renderedList.sort((a, b) => {
+        finalRenderedList.sort((a, b) => {
             let valA, valB;
             if (sortBy === 'fullName') {
                 valA = a.fullName.toLowerCase();
@@ -1806,7 +1860,30 @@ async function loadReadingList(options = {}) {
             return 0;
         });
 
-        tbody.innerHTML = renderedList.map(item => `
+        tbody.innerHTML = finalRenderedList.map(item => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            let displayStatus = item.status || 'unpaid';
+            let statusClass = displayStatus.toLowerCase();
+
+            // Dynamic Status Logic for Display
+            if (displayStatus.toLowerCase() !== 'paid') {
+                if (item.due_date && new Date(item.due_date) < today) {
+                    displayStatus = 'Overdue';
+                    statusClass = 'overdue';
+                }
+            }
+
+            if (item.customer_status.toLowerCase() === 'inactive' || item.customer_status.toLowerCase() === 'disconnected') {
+                displayStatus = 'Disconnected';
+                statusClass = 'disconnected';
+            } else if (item.disconnection_bill_id === item.billingId) {
+                displayStatus = 'Disconnected';
+                statusClass = 'disconnected';
+            }
+
+            return `
             <tr>
                 <td class="mono">${getAccountID(item.customerId)}</td>
                 <td><strong>${item.fullName}</strong></td>
@@ -1816,6 +1893,7 @@ async function loadReadingList(options = {}) {
                 <td><div class="barangay-display" title="${item.address}">${item.barangay}</div></td>
                 <td class="activity-date">${item.date}</td>
                 <td class="mono">${item.meterNo || '--'}</td>
+                <td><span class="badge status-${statusClass}">${displayStatus}</span></td>
                 <td>
                     <button class="btn-icon" title="Edit Reading" 
                             onclick="window.editReading('${item.billingId}', ${item.prev}, '${item.curr}', '${item.fullName.replace(/'/g, "\\'")}', '${item.meterNo}', ${item.customerId})">
@@ -1824,7 +1902,7 @@ async function loadReadingList(options = {}) {
                     <span class="mono" style="font-size: 0.75rem; color: #9E9E9E; display: block; margin-top: 4px;">#${String(item.billNo || item.billingId).padStart(4, '0')}</span>
                 </td>
             </tr>
-        `).join('');
+        `}).join('');
 
     } catch (error) {
         console.error('Error loading reading list:', error);
@@ -1865,6 +1943,89 @@ async function getReaderForBarangay(barangay) {
     } catch (error) {
         console.error('Error getting reader for barangay:', error);
         return 'Error fetching reader';
+    }
+}
+
+/**
+ * Gets the reader ID for a given barangay
+ */
+async function getReaderIdForBarangay(barangay) {
+    try {
+        if (!barangay) return '';
+
+        const { data: boxes, error } = await supabase
+            .from('area_boxes')
+            .select('assigned_reader_id, barangays');
+
+        if (error) throw error;
+        if (!boxes) return '';
+
+        const assignedBox = boxes.find(box =>
+            Array.isArray(box.barangays) && box.barangays.some(bg => bg.toLowerCase().trim() === barangay.toLowerCase().trim())
+        );
+
+        return assignedBox ? assignedBox.assigned_reader_id : '';
+    } catch (error) {
+        console.error('Error getting reader ID for barangay:', error);
+        return '';
+    }
+}
+
+/**
+ * Fetches all staff members assigned as readers in area_boxes
+ */
+async function getAssignedReaders() {
+    try {
+        const { data: boxes, error } = await supabase
+            .from('area_boxes')
+            .select(`
+                staff!assigned_reader_id (id, first_name, last_name)
+            `);
+
+        if (error) throw error;
+        if (!boxes) return [];
+
+        // Filter out null staff and unique by ID
+        const readers = [];
+        const seenIds = new Set();
+
+        boxes.forEach(box => {
+            if (box.staff && !seenIds.has(box.staff.id)) {
+                readers.push({
+                    id: box.staff.id,
+                    name: `${box.staff.last_name}, ${box.staff.first_name}`
+                });
+                seenIds.add(box.staff.id);
+            }
+        });
+
+        return readers.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+        console.error('Error fetching assigned readers:', error);
+        return [];
+    }
+}
+
+/**
+ * Gets the list of barangays assigned to a specific reader ID
+ */
+async function getBarangaysForReader(readerId) {
+    try {
+        if (!readerId) return [];
+
+        const { data: boxes, error } = await supabase
+            .from('area_boxes')
+            .select('barangays')
+            .eq('assigned_reader_id', readerId);
+
+        if (error) throw error;
+        if (!boxes) return [];
+
+        // Flatten all barangays from all boxes assigned to this reader
+        return Array.from(new Set(boxes.flatMap(box => box.barangays || [])));
+    } catch (error) {
+        console.error('Error fetching barangays for reader:', error);
+        return [];
     }
 }
 
@@ -2189,6 +2350,9 @@ window.dbOperations = {
     loadLedgerCard,
     loadReadingList,
     getReaderForBarangay,
+    getReaderIdForBarangay,
+    getAssignedReaders,
+    getBarangaysForReader,
     loadRecentReadingsWidget,
     initiateCutoff,
     confirmCutoff,

@@ -1,4 +1,4 @@
-﻿/* Admin Dashboard Styles - Utilizing shared/common.css for variables and resets */
+/* Admin Dashboard Styles - Utilizing shared/common.css for variables and resets */
 
 :root {
     /* Specialized Admin Variables */
@@ -3885,15 +3885,81 @@ tr.status-inactive .customer-meta {
     display: none;
 }
 
+
+.reading-list-print-header {
+    display: none !important;
+}
+
+#readingListPage .filter-select {
+    height: 42px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    padding: 0 1rem;
+    font-size: 0.9rem;
+    background: var(--bg-white);
+    color: var(--text-primary);
+}
+
 @media print {
     @page {
-        margin: 0;
-        /* Hides browser's native headers and footers */
+        margin: 1cm;
     }
 
     body {
-        padding: 1.5cm 1cm 1.5cm 1cm;
-        /* Manual margins for page content */
+        padding: 0 !important;
+        background: #fff !important;
+    }
+
+    /* Reading List Print Enhancements - ONLY FOR ACTUAL PRINT */
+    .reading-list-print-header {
+        display: block !important;
+    }
+
+    #readingListPrintArea {
+        display: block !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    #readingListTable {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        background: #fff !important;
+        color: #000 !important;
+        margin-top: 1rem;
+    }
+
+    #readingListTable th,
+    #readingListTable td {
+        border: 1.5px solid #000 !important;
+        padding: 8px 10px !important;
+        font-size: 10pt !important;
+        color: #000 !important;
+        background: transparent !important;
+    }
+
+    #readingListTable th {
+        background: #f0f0f0 !important;
+        font-weight: 800 !important;
+        text-transform: uppercase;
+        font-size: 9pt !important;
+    }
+
+    #readingListTable .sort-icon {
+        display: none !important;
+    }
+
+    /* Hide Actions column in print */
+    #readingListTable th:last-child,
+    #readingListTable td:last-child {
+        display: none !important;
+    }
+
+    .barangay-display {
+        border: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+        color: #000 !important;
     }
 
     .custom-print-header {
@@ -6222,3 +6288,54 @@ tr.status-inactive .customer-meta {
     }
 }
 
+
+/* Filter bar adjustments for Reading List */
+#readingListPage .filter-bar {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin-bottom: 2rem;
+}
+
+.staff-badge-select option {
+    background: #1a1a1a;
+    color: white;
+}
+
+/* Status Badges for Reading List */
+.badge.status-paid {
+    background: rgba(76, 175, 80, 0.1);
+    color: #4CAF50;
+    border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.badge.status-unpaid {
+    background: rgba(244, 67, 54, 0.1);
+    color: #F44336;
+    border: 1px solid rgba(244, 67, 54, 0.2);
+}
+
+.badge.status-overdue {
+    background: rgba(255, 87, 34, 0.1);
+    color: #FF5722;
+    border: 1px solid rgba(255, 87, 34, 0.2);
+    font-weight: 600;
+}
+
+.badge.status-cutoff {
+    background: rgba(183, 28, 28, 0.1);
+    color: #B71C1C;
+    border: 1px solid rgba(183, 28, 28, 0.2);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.badge.status-disconnected {
+    background: rgba(66, 66, 66, 0.1);
+    color: #424242;
+    border: 1px solid rgba(66, 66, 66, 0.2);
+    opacity: 0.8;
+}

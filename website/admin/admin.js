@@ -93,12 +93,14 @@ function refreshBilling() {
     const search = document.getElementById('billingSearch')?.value || '';
     const status = document.getElementById('billingStatusFilter')?.value || '';
     const month = document.getElementById('billingMonthFilter')?.value || '';
+    const barangay = document.getElementById('billingBarangayFilter')?.value || '';
 
     if (window.dbOperations && window.dbOperations.loadBilling) {
         return window.dbOperations.loadBilling({
             search,
             status,
-            month
+            month,
+            barangay
         });
     }
     return Promise.resolve();
@@ -448,6 +450,8 @@ function initializeReadingListPage() {
     const searchInput = document.getElementById('readingListSearch');
     const periodFilter = document.getElementById('readingListPeriodFilter');
     const barangayFilter = document.getElementById('readingListBarangayFilter');
+    const statusFilter = document.getElementById('readingListStatusFilter');
+    const readerFilter = document.getElementById('readingListReaderFilter');
     const printBtn = document.getElementById('printReadingListBtn');
 
     // 1. Populate filters
@@ -456,31 +460,50 @@ function initializeReadingListPage() {
     // 2. Event Listeners for filters
     const updateList = async () => {
         const period = periodFilter?.value || '';
+        const readerId = readerFilter?.value || '';
         const barangay = barangayFilter?.value || '';
+        const status = statusFilter?.value || '';
         const search = searchInput?.value || '';
 
-        // Update associated reader name
-        if (barangay) {
+        let targetBarangays = [];
+        
+        // 1. If a reader is selected, get their barangays
+        if (readerId) {
+            targetBarangays = await window.dbOperations.getBarangaysForReader(readerId);
+            
+            // If reader has assigned zones, and current barangay filter is not one of them, reset it
+            if (barangay && !targetBarangays.includes(barangay)) {
+                barangayFilter.value = '';
+            }
+        }
+
+        // 2. Fetch data based on reader + barangay
+        window.dbOperations.loadReadingList({
+            period,
+            barangay,
+            readerId,
+            status, // Pass status to database operation
+            search,
+            sortBy: readingListSortConfig.key,
+            sortOrder: readingListSortConfig.order
+        });
+
+        // 3. Update associated reader name for print
+        if (readerId) {
+            const readerOpt = readerFilter.options[readerFilter.selectedIndex];
+            const readerName = readerOpt.text;
+            if (document.getElementById('printReaderName')) document.getElementById('printReaderName').textContent = readerName;
+        } else if (barangay) {
             const reader = await window.dbOperations.getReaderForBarangay(barangay);
-            document.getElementById('assignedReaderName').textContent = reader;
-            // Update print header info
             if (document.getElementById('printReaderName')) document.getElementById('printReaderName').textContent = reader;
-            if (document.getElementById('printBarangayName')) document.getElementById('printBarangayName').textContent = barangay;
-        } else {
-            document.getElementById('assignedReaderName').textContent = 'Not Assigned';
         }
 
         if (period && document.getElementById('printPeriodName')) {
             document.getElementById('printPeriodName').textContent = period;
         }
-
-        window.dbOperations.loadReadingList({
-            period,
-            barangay,
-            search,
-            sortBy: readingListSortConfig.key,
-            sortOrder: readingListSortConfig.order
-        });
+        if (barangay && document.getElementById('printBarangayName')) {
+            document.getElementById('printBarangayName').textContent = barangay;
+        }
     };
 
     // Expose update function globally for sorting to use
@@ -488,14 +511,30 @@ function initializeReadingListPage() {
 
     searchInput?.addEventListener('input', debounce(updateList, 300));
     periodFilter?.addEventListener('change', updateList);
-    barangayFilter?.addEventListener('change', updateList);
+    readerFilter?.addEventListener('change', updateList);
+    statusFilter?.addEventListener('change', updateList);
+    
+    barangayFilter?.addEventListener('change', async () => {
+        const barangay = barangayFilter.value;
+        if (barangay) {
+            // Auto-sync Reader filter when Barangay is selected
+            const readerId = await window.dbOperations.getReaderIdForBarangay(barangay);
+            if (readerFilter) {
+                readerFilter.value = readerId || '';
+            }
+        } else if (readerFilter) {
+            // Reset to "All Readers" if "All Barangays" is selected
+            readerFilter.value = '';
+        }
+        updateList();
+    });
 
     // 3. Print Functionality
     if (printBtn) {
         printBtn.onclick = () => {
             const period = periodFilter?.value || 'All Periods';
             const barangay = barangayFilter?.value || 'All Barangays';
-            const reader = document.getElementById('assignedReaderName')?.textContent || 'Not Assigned';
+            const reader = readerFilter?.options[readerFilter.selectedIndex]?.text || 'Not Assigned';
 
             // Update print header info
             if (document.getElementById('printPeriodName')) document.getElementById('printPeriodName').textContent = period;
@@ -528,8 +567,20 @@ function initializeReadingListPage() {
 async function populateReadingListFilters() {
     const periodSelect = document.getElementById('readingListPeriodFilter');
     const barangaySelect = document.getElementById('readingListBarangayFilter');
+    const readerSelect = document.getElementById('readingListReaderFilter');
 
-    if (!periodSelect || !barangaySelect) return;
+    if (!periodSelect || !barangaySelect || !readerSelect) return;
+
+    // Populate Readers
+    if (readerSelect && readerSelect.options.length <= 1) {
+        const readers = await window.dbOperations.getAssignedReaders();
+        readers.forEach(reader => {
+            const opt = document.createElement('option');
+            opt.value = reader.id;
+            opt.textContent = reader.name;
+            readerSelect.appendChild(opt);
+        });
+    }
 
     // Populate Barangays
     if (barangaySelect.options.length <= 1) {
@@ -856,7 +907,7 @@ async function showBillModal(billId) {
             <div class="modal-overlay" id="billModal">
                 <div class="modal premium-adjustment" style="max-width: 500px; padding: 0;">
                     <div class="modal-header no-border" style="padding: 1.5rem; border-bottom: 1px solid var(--border);">
-                        <h3 style="margin: 0;">Bill Details - #BIL-${String(bill.id).padStart(4, '0')}</h3>
+                        <h3 style="margin: 0;">Bill Details - #BIL-${String(bill.bill_no || bill.id).padStart(4, '0')}</h3>
                         <button class="modal-close" onclick="closeModal('billModal')" style="background: transparent; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-light);">
                             <i class="fas fa-times"></i>
                         </button>
@@ -918,7 +969,7 @@ async function handleViewLedger(button) {
         // 1. Get customer ID from the bill ID
         const { data: bill, error: billError } = await supabase
             .from('billing')
-            .select('customer_id, customers(last_name, first_name, middle_initial)')
+            .select('customer_id, bill_no, receipt_no, customers(last_name, first_name, middle_initial)')
             .eq('id', billId)
             .maybeSingle();
 
@@ -974,7 +1025,12 @@ async function handleViewLedger(button) {
                                     <tr>
                                         <td>${formatLocalDateTime(item.due_date, false)}</td>
                                         <td>${item.billing_period}</td>
-                                        <td>BIL-${String(item.id).padStart(4, '0')}</td>
+                                        <td>
+                                            <div style="display: flex; flex-direction: column;">
+                                                <span>BIL-${String(item.bill_no || item.id).padStart(4, '0')}</span>
+                                                ${item.receipt_no ? `<span style="font-size: 0.75rem; color: var(--success);">RCP-${new Date(item.payment_date).getFullYear()}-${String(item.receipt_no).padStart(4, '0')}</span>` : ''}
+                                            </div>
+                                        </td>
                                         <td>₱${item.amount.toLocaleString()}</td>
                                         <td>${item.status === 'paid' ? '₱' + item.amount.toLocaleString() : '-'}</td>
                                         <td>₱${item.balance.toLocaleString()}</td>
@@ -1579,41 +1635,23 @@ function initializeSearchFilters() {
 
     // Initialize Print Billing Summary
     const printBillingBtn = document.getElementById('printBillingSummaryBtn');
-    const printMenu = document.getElementById('printReportMenu');
     
-    if (printBillingBtn && printMenu) {
-        printBillingBtn.onclick = (e) => {
-            e.stopPropagation();
-            const isVisible = printMenu.style.display === 'block';
-            printMenu.style.display = isVisible ? 'none' : 'block';
-        };
-
-        // Close on outside click
-        document.addEventListener('click', () => {
-            printMenu.style.display = 'none';
-        });
-
-        const printLinks = printMenu.querySelectorAll('.dropdown-item');
-        printLinks.forEach(link => {
-            link.onclick = async (e) => {
-                e.preventDefault();
-                const type = link.dataset.type;
-                const statusFilter = document.getElementById('billingStatusFilter');
-                if (statusFilter) {
-                    statusFilter.value = type;
-                    // Trigger refresh and wait
-                    if (window.refreshBilling) {
-                        try {
-                            showLoadingOverlay('Preparing report...');
-                            await window.refreshBilling();
-                            initPrintBillingSummary(type);
-                        } finally {
-                            hideLoadingOverlay();
-                        }
-                    }
+    if (printBillingBtn) {
+        printBillingBtn.onclick = async () => {
+            try {
+                showLoadingOverlay('Preparing report...');
+                // Ensure data is fresh based on CURRENT filters
+                if (window.refreshBilling) {
+                    await window.refreshBilling();
                 }
-            };
-        });
+                initPrintBillingSummary();
+            } catch (error) {
+                console.error('Print error:', error);
+                showNotification('Failed to prepare print report', 'error');
+            } finally {
+                hideLoadingOverlay();
+            }
+        };
     }
 }
 
@@ -1621,9 +1659,12 @@ function initializeSearchFilters() {
  * Handle printing the current filtered billing list as a summary
  * Grouped by Barangay
  */
-async function initPrintBillingSummary(reportType = '') {
+async function initPrintBillingSummary() {
     const data = window.lastBillingData || [];
-    console.log(`[PrintSummary] Initializing print for ${data.length} records (${reportType})...`);
+    const statusFilter = document.getElementById('billingStatusFilter');
+    const reportType = statusFilter ? statusFilter.value : '';
+    
+    console.log(`[PrintSummary] Initializing print for ${data.length} records (Type: ${reportType || 'All'})...`);
     
     if (data.length === 0) {
         showNotification('No billing records found to print.', 'warning');

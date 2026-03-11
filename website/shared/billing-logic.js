@@ -243,7 +243,7 @@
                                 <label>Cashier / Collector</label>
                             </div>
                             <div class="serial-number">
-                                № <span class="serial-red">${String(bill.id).padStart(6, '0')}</span>
+                                № <span class="serial-red">${bill.receipt_no ? `RCP-${new Date(bill.payment_date || bill.updated_at).getFullYear()}-${String(bill.receipt_no).padStart(4, '0')}` : String(bill.bill_no || bill.id).padStart(6, '0')}</span>
                             </div>
                         </div>
                     </div>
@@ -297,7 +297,10 @@
                     </header>
 
                     <div class="receipt-id-row">
-                        <span>#BIL-${String(bill.id).padStart(4, '0')}</span>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <span>#BIL-${String(bill.bill_no || bill.id).padStart(4, '0')}</span>
+                            ${bill.receipt_no ? `<span style="font-size: 0.8em; color: var(--success);">#RCP-${new Date(bill.payment_date || bill.updated_at).getFullYear()}-${String(bill.receipt_no).padStart(4, '0')}</span>` : ''}
+                        </div>
                         <span>${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}</span>
                     </div>
 

@@ -643,7 +643,7 @@ async function loadRecentCollections() {
                 <tr class="${isInactive ? 'status-inactive' : ''}">
                     <td>${customer.last_name}, ${customer.first_name}${isInactive ? ' <span class="badge-deactivated">DEACTIVATED</span>' : ''}</td>
                     <td class="text-success">₱${parseFloat(bill.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                    <td class="mono">#BIL-${String(bill.id).padStart(4, '0')}</td>
+                    <td class="mono">#BIL-${String(bill.bill_no || bill.id).padStart(4, '0')}</td>
                     <td>${formatLocalDateTime(bill.updated_at, false)}</td>
                 </tr>
             `;
@@ -662,10 +662,11 @@ async function loadBilling() {
     const barangay = document.getElementById('billingBarangayFilter')?.value || '';
 
     try {
-        // 1. Fetch bills and settings
-        const [billsRes, settingsRes] = await Promise.all([
+        // 1. Fetch bills, customers, and settings in parallel
+        const [billsRes, settingsRes, customersRes] = await Promise.all([
             supabase.from('billing').select('*').order('id', { ascending: false }),
-            window.cashierDb.loadSystemSettings()
+            window.cashierDb.loadSystemSettings(),
+            supabase.from('customers').select('id, first_name, last_name, meter_number, address, status, disconnection_bill_id')
         ]);
 
         const bills = billsRes.data;
@@ -678,36 +679,47 @@ async function loadBilling() {
             return;
         }
 
+        // Build customer lookup map (needed for disconnected filter + display)
+        const customerMap = {};
+        (customersRes.data || []).forEach(c => { customerMap[c.id] = c; });
+
         // Auto-update overdue status and calculate cutoff threshold
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const cutoffGrace = settings ? (settings.cutoff_days || settings.cutoff_grace_period || 30) : 30;
+        const cutoffGrace = settings ? (settings.cutoff_grace_period || settings.cutoff_days || 30) : 30;
 
         for (const bill of bills) {
-            if (bill.status === 'unpaid' && new Date(bill.due_date) < today) {
+            if (bill.status === 'unpaid' && bill.due_date && new Date(bill.due_date) < today) {
                 bill.status = 'overdue';
                 supabase.from('billing').update({ status: 'overdue' }).eq('id', bill.id);
             }
         }
 
-        // Apply Filters client-side (Robust to schema differences)
+        // Apply Filters client-side
         const filteredBills = bills.filter(bill => {
             if (status) {
-                if (status.toLowerCase() === 'cutoff') {
+                const statusLower = status.toLowerCase();
+                if (statusLower === 'cutoff') {
                     if (bill.status !== 'overdue' || !bill.due_date) return false;
                     const dueDate = new Date(bill.due_date);
                     dueDate.setHours(0, 0, 0, 0);
                     const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
                     if (diffDays < cutoffGrace) return false;
-                } else if ((bill.status || '').toLowerCase() !== status.toLowerCase()) {
+                } else if (statusLower === 'disconnected') {
+                    // Disconnected = customer status is inactive, NOT bill status
+                    const customer = customerMap[bill.customer_id];
+                    const cs = (customer?.status || '').toLowerCase();
+                    return cs === 'inactive' || cs === 'disconnected';
+                } else if (statusLower === 'overdue') {
+                    // Match bills with overdue status (already auto-updated above)
+                    return bill.status === 'overdue';
+                } else if ((bill.status || '').toLowerCase() !== statusLower) {
                     return false;
                 }
             }
             if (period && (bill.billing_period || '').toLowerCase() !== period.toLowerCase()) return false;
 
-            // First pass filtering for status and period only.
-            // Search filtering is handled in the second pass after customer data is loaded.
             return true;
         });
 
@@ -716,22 +728,13 @@ async function loadBilling() {
             return;
         }
 
-        // 2. Fetch related customers (including address for barangay filtering)
-        const searchCustomerIds = [...new Set(filteredBills.map(b => b.customer_id))];
-        const { data: searchCustomers, error: searchCustomerError } = await supabase
-            .from('customers')
-            .select('id, first_name, last_name, meter_number, address, status')
-            .in('id', searchCustomerIds);
-
-        if (searchCustomerError) throw searchCustomerError;
-
-        const searchCustomerMap = {};
-        searchCustomers.forEach(c => { searchCustomerMap[c.id] = c; });
+        // Use pre-loaded customer map for search and display
+        const searchCustomerMap = customerMap;
 
         // Final Search & Barangay Filter (checks names and address)
         const finalResults = filteredBills.filter(bill => {
-            const billIdStr = bill.id.toString();
-            const formattedBillId = `#BIL-${billIdStr.padStart(4, '0')}`.toLowerCase();
+            const billNoStr = (bill.bill_no || bill.id).toString();
+            const formattedBillId = `#BIL-${billNoStr.padStart(4, '0')}`.toLowerCase();
             const customer = searchCustomerMap[bill.customer_id] || {};
             const fullName = `${customer.first_name || ''} ${customer.last_name || ''}`.toLowerCase();
             const meterNo = (customer.meter_number || '').toLowerCase();
@@ -745,7 +748,7 @@ async function loadBilling() {
             const term = search.toLowerCase();
 
             return (
-                billIdStr.includes(term) ||
+                billNoStr.includes(term) ||
                 formattedBillId.includes(term) ||
                 fullName.includes(term) ||
                 meterNo.includes(term) ||
@@ -779,7 +782,7 @@ async function loadBilling() {
 
             return `
                 <tr class="${isInactive ? 'status-inactive' : ''}">
-                    <td class="mono">#BIL-${String(bill.id).padStart(4, '0')}</td>
+                    <td class="mono">#BIL-${String(bill.bill_no || bill.id).padStart(4, '0')}</td>
                     <td>
                         <div class="customer-column">
                             <span class="customer-name">${customer.last_name}, ${customer.first_name}</span>
@@ -1135,7 +1138,7 @@ async function loadCollectionRecords() {
         // Paid Cash Bills
         let cashQuery = supabase
             .from('billing')
-            .select('id, amount, updated_at, customer_id')
+            .select('*')
             .eq('status', 'paid');
 
         if (dateFrom) cashQuery = cashQuery.gte('updated_at', `${dateFrom}T00:00:00`);
@@ -1153,7 +1156,9 @@ async function loadCollectionRecords() {
                 amount: p.amount,
                 date: p.updated_at,
                 method: 'Cash',
-                ref: `#BIL-${String(p.id).padStart(4, '0')}`,
+                bill_no: p.bill_no,
+                receipt_no: p.receipt_no,
+                ref: p.receipt_no ? `RCP-${new Date(p.updated_at).getFullYear()}-${String(p.receipt_no).padStart(4, '0')}` : `RCP-${new Date(p.updated_at).getFullYear()}-${String(p.id).padStart(4, '0')}`,
                 customer_id: p.customer_id
             }))
         ];
@@ -1226,6 +1231,10 @@ function renderLogRecords() {
     let html = '';
     let lastDate = '';
 
+    // Bill number is a sequential count of recorded payments (not the DB id)
+    // Data is sorted descending (newest first), so first item = highest bill number
+    let billCounter = data.length;
+
     data.forEach(u => {
         total += parseFloat(u.amount);
 
@@ -1256,7 +1265,7 @@ function renderLogRecords() {
 
         html += `
             <tr class="${u.isInactive ? 'status-inactive' : ''}">
-                <td><span class="time-badge">${time}</span></td>
+                <td class="mono">#BIL-${String(u.bill_no || u.id).padStart(4, '0')}</td>
                 <td class="account-id">${u.accountID}</td>
                 <td>${u.customerName}${u.isInactive ? ' <span class="badge-deactivated">DEACTIVATED</span>' : ''}</td>
                 <td class="text-success font-weight-bold">₱${parseFloat(u.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
@@ -1264,6 +1273,8 @@ function renderLogRecords() {
                 <td><code style="font-size: 0.85rem;">${u.ref}</code></td>
             </tr>
         `;
+
+        billCounter--;
     });
 
     if (totalEl) totalEl.textContent = `₱${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
@@ -1367,7 +1378,7 @@ function initializeLedgerPage() {
         printBtn.onclick = () => {
             const printDate = document.querySelector('.print-date');
             if (printDate) {
-                printDate.textContent = `Generated on: ${formatLocalDateTime(new Date())}`;
+                printDate.textContent = `Generated on: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Manila' })}`;
             }
             document.body.classList.add('printing-ledger');
             window.print();
@@ -1379,7 +1390,8 @@ function initializeLedgerPage() {
     const closeDetail = () => {
         document.getElementById('ledgerMasterView').style.display = 'block';
         document.getElementById('ledgerDetailView').style.display = 'none';
-        document.querySelector('.ledger-controls').style.display = 'block';
+        // Show filter elements again
+        document.querySelectorAll('.ledger-controls .search-box, .ledger-controls .filter-select').forEach(el => el.style.display = '');
         document.getElementById('backToMasterBtn').style.display = 'none';
         document.getElementById('printLedgerBtn').innerHTML = '<i class="fas fa-print"></i> Print Report';
     };
@@ -1400,8 +1412,9 @@ function initializeLedgerPage() {
 async function viewCustomerLedger(customerId) {
     document.getElementById('ledgerMasterView').style.display = 'none';
     document.getElementById('ledgerDetailView').style.display = 'block';
-    document.querySelector('.ledger-controls').style.display = 'none';
-    document.getElementById('backToMasterBtn').style.display = 'block';
+    // Hide only filter elements (search, selects), keep buttons visible
+    document.querySelectorAll('.ledger-controls .search-box, .ledger-controls .filter-select').forEach(el => el.style.display = 'none');
+    document.getElementById('backToMasterBtn').style.display = 'inline-flex';
     document.getElementById('printLedgerBtn').innerHTML = '<i class="fas fa-print"></i> Print Customer Card';
 
     // Track for realtime refresh
