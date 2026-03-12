@@ -418,7 +418,7 @@ function initializeNavigation() {
             pageTitle.textContent = titles[pageName] || 'Dashboard';
 
             if (pageName === 'ledger') {
-                initializeLedgerPage();
+                await initializeLedgerPage();
             }
 
             if (pageName === 'customers') {
@@ -434,7 +434,7 @@ function initializeNavigation() {
             }
 
             if (pageName === 'readingList') {
-                initializeReadingListPage();
+                await initializeReadingListPage();
             }
         });
     });
@@ -442,7 +442,7 @@ function initializeNavigation() {
 
 let isReadingListUIInitialized = false;
 
-function initializeReadingListPage() {
+async function initializeReadingListPage() {
     if (isReadingListUIInitialized) return;
 
     console.log('🏗️ Initializing Reading List UI...');
@@ -453,8 +453,8 @@ function initializeReadingListPage() {
     const readerFilter = document.getElementById('readingListReaderFilter');
     const printBtn = document.getElementById('printReadingListBtn');
 
-    // 1. Populate filters
-    populateReadingListFilters();
+    // 1. Populate filters (awaited so updateList uses populated values)
+    await populateReadingListFilters();
 
     // 2. Event Listeners for filters
     const updateList = async () => {
@@ -503,8 +503,11 @@ function initializeReadingListPage() {
         }
     };
 
-    // Expose update function globally for sorting to use
+    // Expose update function globally
     window.updateReadingList = updateList;
+
+    // 3. Initial Load
+    updateList();
 
     searchInput?.addEventListener('input', debounce(updateList, 300));
     periodFilter?.addEventListener('change', updateList);
@@ -602,7 +605,7 @@ async function populateReadingListFilters() {
 
             if (error) throw error;
 
-            // FIX: Normalize and deduplicate periods
+            // Normalize and deduplicate periods
             const rawPeriods = data.map(b => b.billing_period).filter(Boolean);
             const normalizedMap = {};
             rawPeriods.forEach(p => {
@@ -612,20 +615,12 @@ async function populateReadingListFilters() {
                 }
             });
 
-            // Ensure current month is always present
-            const now = new Date();
-            const currentMonthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-            if (!normalizedMap[currentMonthLabel]) {
-                normalizedMap[currentMonthLabel] = currentMonthLabel;
-            }
-
             // Clear and repopulate
             periodSelect.innerHTML = '<option value="">All Periods</option>';
             Object.keys(normalizedMap).sort((a, b) => new Date(b) - new Date(a)).forEach(display => {
                 const opt = document.createElement('option');
-                opt.value = display; // Use normalized display as the value
+                opt.value = display;
                 opt.textContent = display;
-                if (display === currentMonthLabel) opt.selected = true; // Default to current month
                 periodSelect.appendChild(opt);
             });
         } catch (error) {
@@ -2082,7 +2077,7 @@ function updateDashboardCharts(data) {
 window.updateDashboardCharts = updateDashboardCharts;
 // === MASTER LEDGER LOGIC ===
 
-function initializeLedgerPage() {
+async function initializeLedgerPage() {
     const barangayFilter = document.getElementById('ledgerBarangayFilter');
     const periodFilter = document.getElementById('ledgerPeriodFilter');
     const searchInput = document.getElementById('ledgerSearch');
@@ -2092,7 +2087,7 @@ function initializeLedgerPage() {
     populateBarangayFilters('ledgerBarangayFilter');
 
     // Populate Period filter from billing data
-    populateLedgerPeriodFilter();
+    await populateLedgerPeriodFilter();
 
     // Event Listeners
     const updateLedger = () => {
@@ -2223,8 +2218,12 @@ async function populateLedgerPeriodFilter() {
         const sortedKeys = Object.keys(normalizedMap).sort((a, b) => new Date(b) - new Date(a));
 
         const currentVal = select.value;
+        
         select.innerHTML = '<option value="">All Periods</option>' +
-            sortedKeys.map(display => `<option value="${display}" ${display === currentVal ? 'selected' : ''}>${display}</option>`).join('');
+            sortedKeys.map(display => {
+                const isSelected = display === currentVal;
+                return `<option value="${display}" ${isSelected ? 'selected' : ''}>${display}</option>`;
+            }).join('');
     } catch (e) {
         console.error('Could not populate ledger period filter:', e);
     }

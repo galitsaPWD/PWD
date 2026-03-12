@@ -571,18 +571,8 @@ async function loadBilling(filters = {}) {
             const searchMonth = normalizePeriod(month);
             
             filteredData = filteredData.filter(b => {
-                const periodMatch = normalizePeriod(b.billing_period) === searchMonth;
-                
-                // Support filtering by Due Date Month as well (User intuition fix)
-                let dueDateMatch = false;
-                if (b.due_date) {
-                    const d = new Date(b.due_date);
-                    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-                    const dueDateMonthStr = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
-                    dueDateMatch = dueDateMonthStr === searchMonth;
-                }
-                
-                return periodMatch || dueDateMatch;
+                // Compare strictly by billing_period for consistency
+                return normalizePeriod(b.billing_period) === searchMonth;
             });
         }
 
@@ -1504,23 +1494,11 @@ async function loadMasterLedger(options = {}) {
                 accountId.includes(lowSearch) ||
                 meterNo.includes(lowSearch);
 
-            // When a period is selected, only show customers who have a matching bill in that period
-            // (Using normalized matching for period or due date month)
-            const matchesPeriod = !period || unpaidBills.some(b => {
+            const searchMonth = period ? normalizePeriod(period) : null;
+            const matchesPeriod = !searchMonth || unpaidBills.some(b => {
                 if (b.customer_id !== c.id) return false;
-                
-                const searchMonth = normalizePeriod(period);
-                const periodMatch = normalizePeriod(b.billing_period) === searchMonth;
-                
-                let dueDateMatch = false;
-                if (b.due_date) {
-                    const d = new Date(b.due_date);
-                    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-                    const dueDateMonthStr = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
-                    dueDateMatch = dueDateMonthStr === searchMonth;
-                }
-                
-                return periodMatch || dueDateMatch;
+                // Strict match on billing_period only
+                return normalizePeriod(b.billing_period) === searchMonth;
             });
 
             return matchesBarangay && matchesSearch && matchesPeriod;
@@ -1736,7 +1714,8 @@ async function loadReadingList(options = {}) {
                 customers!inner (
                     id, last_name, first_name, middle_initial, address, meter_number, has_discount, status, disconnection_date, disconnection_bill_id
                 )
-            `);
+            `)
+            .order('id', { ascending: false });
 
         // Apply filters
         if (barangay) {
@@ -1748,6 +1727,10 @@ async function loadReadingList(options = {}) {
             query = query.or(`customers.first_name.ilike.${searchPattern},customers.last_name.ilike.${searchPattern},customers.meter_number.ilike.${searchPattern}`);
         }
 
+        // Period filtering is handled CLIENT-SIDE ONLY (after fetch) 
+        // because billing_period is stored in multiple formats (e.g. "Mar 2026", "March 2026")
+        // and server-side .eq()/.or() cannot reliably match all variants.
+
         const { data: bills, error: bError } = await query;
         if (bError) throw bError;
 
@@ -1756,40 +1739,61 @@ async function loadReadingList(options = {}) {
             return;
         }
 
-        // 2. Client-side period normalization and filtering
+        // 2. Client-side Period Filter (handles format variations like "Mar 2026" vs "March 2026")
         const searchMonth = period ? normalizePeriod(period) : null;
         let filteredBills = bills;
         
         if (searchMonth) {
-            filteredBills = bills.filter(b => normalizePeriod(b.billing_period) === searchMonth);
+            console.log('[ReadingList] Filtering for period:', searchMonth, '| Total bills:', bills.length);
+            filteredBills = bills.filter(b => {
+                const normalized = normalizePeriod(b.billing_period);
+                return normalized === searchMonth;
+            });
+            console.log('[ReadingList] After filter:', filteredBills.length, 'matching bills');
         }
 
-        // 3. Map for display
-        const renderedList = filteredBills.map(b => {
-            const c = b.customers;
-            const fullName = `${c.last_name}, ${c.first_name}${c.middle_initial ? ' ' + c.middle_initial + '.' : ''}`;
-            const dateRead = formatLocalDateTime(b.updated_at || b.reading_date, true);
-            
-            return {
-                billNo: b.bill_no,
-                billingId: b.id,
-                customerId: c.id,
-                fullName: fullName,
-                meterNo: c.meter_number,
-                address: c.address,
-                prev: b.previous_reading || 0,
-                curr: b.current_reading || 0,
-                usage: b.consumption || 0,
-                date: dateRead,
-                barangay: getBarangay(c.address),
-                status: b.status || 'unpaid',
-                due_date: b.due_date,
-                is_overdue: b.is_overdue || false,
-                customer_status: c.status || 'active',
-                disconnection_bill_id: c.disconnection_bill_id,
-                updated_at: b.updated_at || b.created_at || b.reading_date
-            };
+        // If period filter produced no results, show empty message
+        if (filteredBills.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 3rem; color: #9E9E9E;">No readings found for ${period || 'the selected filters'}.</td></tr>`;
+            return;
+        }
+
+        // 3. Group by Customer to prevent duplicates (Latest Reading ONLY)
+        const customerMap = new Map();
+        
+        filteredBills.forEach(b => {
+            const cid = b.customer_id;
+            // If multiple records exist for this customer, only keep the NEWEST one
+            if (!customerMap.has(cid) || new Date(b.updated_at || b.created_at) > new Date(customerMap.get(cid).rawTimestamp)) {
+                const c = b.customers;
+                const fullName = `${c.last_name}, ${c.first_name}${c.middle_initial ? ' ' + c.middle_initial + '.' : ''}`;
+                const dateRead = formatLocalDateTime(b.updated_at || b.reading_date, true);
+                
+                customerMap.set(cid, {
+                    id: b.id,
+                    billingId: b.id,
+                    billNo: b.bill_no,
+                    customerId: c.id,
+                    fullName: fullName,
+                    meterNo: c.meter_number,
+                    address: c.address,
+                    prev: b.previous_reading || 0,
+                    curr: b.current_reading || 0,
+                    usage: b.consumption || 0,
+                    date: dateRead,
+                    barangay: getBarangay(c.address),
+                    status: b.status || 'unpaid',
+                    due_date: b.due_date,
+                    is_overdue: b.is_overdue || false,
+                    customer_status: c.status || 'active',
+                    disconnection_bill_id: c.disconnection_bill_id,
+                    updated_at: b.updated_at || b.created_at || b.reading_date,
+                    rawTimestamp: b.updated_at || b.created_at || b.reading_date
+                });
+            }
         });
+
+        const renderedList = Array.from(customerMap.values());
 
         // 3.1 Apply precise client-side barangay/reader filter if specified
         let finalRenderedList = renderedList;
@@ -1841,13 +1845,13 @@ async function loadReadingList(options = {}) {
                 }
             }
 
-            if (item.customer_status.toLowerCase() === 'inactive' || item.customer_status.toLowerCase() === 'disconnected') {
-                displayStatus = 'Disconnected';
-                statusClass = 'disconnected';
-            } else if (item.disconnection_bill_id === item.billingId) {
-                displayStatus = 'Disconnected';
-                statusClass = 'disconnected';
-            }
+        if (item.customer_status.toLowerCase() === 'inactive' || item.customer_status.toLowerCase() === 'disconnected') {
+            displayStatus = 'Disconnected';
+            statusClass = 'disconnected';
+        } else if (item.disconnection_bill_id === item.id) {
+            displayStatus = 'Disconnected';
+            statusClass = 'disconnected';
+        }
 
             return `
             <tr>
@@ -2454,4 +2458,3 @@ function _liveRefreshBillingUI() {
         window.updateReadingList();
     }
 }
-

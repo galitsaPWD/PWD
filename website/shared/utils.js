@@ -213,51 +213,52 @@
     /**
      * Normalize billing periods strings consistently (e.g. "Mar 2026" -> "March 2026")
      */
+    function getDefaultPeriodLabel() {
+        return new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    }
+
     function normalizePeriod(period) {
         if (!period) return null;
-        const str = period.trim();
+        let str = period.trim().replace(/,/g, '');
 
         const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
         const shortNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-        // Handle "MM/DD/YYYY" full date format (e.g., "02/18/2026")
         const dateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
         if (dateMatch) {
-            const monthIdx = parseInt(dateMatch[1]) - 1;
+            const monthIdx = parseInt(dateMatch[1], 10) - 1;
             if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${dateMatch[3]}`;
         }
 
-        // Try "YYYY-MM-DD" ISO date format (e.g., "2026-02-18")
         const isoDateMatch = str.match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
         if (isoDateMatch) {
-            const monthIdx = parseInt(isoDateMatch[2]) - 1;
+            const monthIdx = parseInt(isoDateMatch[2], 10) - 1;
             if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${isoDateMatch[1]}`;
         }
 
-        // Try "M/YYYY" or "MM/YYYY" (e.g., "2/2026")
         const slashMatch = str.match(/^(\d{1,2})[\/\-\s](\d{4})$/);
         if (slashMatch) {
-            const monthIdx = parseInt(slashMatch[1]) - 1;
+            const monthIdx = parseInt(slashMatch[1], 10) - 1;
             if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${slashMatch[2]}`;
         }
 
-        // Handle string months like "March 2026" or "Mar 2026"
         const words = str.split(/[\s-]+/);
         if (words.length >= 2) {
             const mStr = words[0].toLowerCase();
-            const yStr = words[words.length - 1]; // last word is year
-            const yearMatch = yStr.match(/^20\d{2}$/); // "2026", "2025"
+            const yStr = words[words.length - 1];
+            const yearMatch = yStr.match(/^(20\d{2})$/);
             
             if (yearMatch) {
                 for (let i = 0; i < 12; i++) {
-                    if (mStr === monthNames[i].toLowerCase() || mStr === shortNames[i].toLowerCase() || mStr.startsWith(shortNames[i].toLowerCase())) {
+                    const long = monthNames[i].toLowerCase();
+                    const short = shortNames[i].toLowerCase();
+                    if (mStr === long || mStr === short || (mStr.length >= 3 && mStr.startsWith(short))) {
                         return `${monthNames[i]} ${yStr}`;
                     }
                 }
             }
         }
 
-        // Fallback: capitalize first letter
         if (str.length > 0) {
             return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
         }
@@ -275,7 +276,8 @@
         debounce,
         escapeHTML,
         initPasswordToggles,
-        normalizePeriod
+        normalizePeriod,
+        getDefaultPeriodLabel
     };
 
     // Global overrides for backward compatibility
@@ -289,4 +291,5 @@
     window.escapeHTML = escapeHTML;
     window.initPasswordToggles = initPasswordToggles;
     window.normalizePeriod = normalizePeriod;
+    window.getDefaultPeriodLabel = getDefaultPeriodLabel;
 })();
