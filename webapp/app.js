@@ -888,8 +888,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
     }
 
     const consumption = value - prevReading;
-    // Standardize to "Month Year" format
     const now = new Date();
+    // Reverted to current month as per user workflow
     const billingPeriod = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
     const readingDate = now.toISOString().split('T')[0];
 
