@@ -220,8 +220,14 @@ async function checkSession() {
 
 async function handleLogin(e) {
     e.preventDefault();
-    const email = document.getElementById('email').value.trim();
+    let email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value;
+
+    // Automatically append @gmail.com if input is missing @
+    if (email && !email.includes('@')) {
+        email += '@gmail.com';
+    }
+
     const errorEl = document.getElementById('auth-error');
 
     showLoading(true);
@@ -888,8 +894,8 @@ async function submitReading(customerId, prevReading, hasDiscount, arrears) {
     }
 
     const consumption = value - prevReading;
+    // Standardize to "Month Year" format
     const now = new Date();
-    // Reverted to current month as per user workflow
     const billingPeriod = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
     const readingDate = now.toISOString().split('T')[0];
 
