@@ -2,7 +2,68 @@
 
 // Helpers are now partially moved to shared/utils.js
 
+/* === AUDIT LOG SYSTEM === */
+window.logAuditAction = async function(actionType, entityType, entityId, details, metadata = null) {
+    try {
+        // 1. Get current auth session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+            console.warn('[Audit Log] No active session to log action:', actionType);
+            return;
+        }
 
+        // 2. Look up staff by matching username from email
+        // Login appends @gmail.com to usernames, so we strip it to match
+        const email = session.user.email || '';
+        const username = email.split('@')[0]; // e.g. "wana@gmail.com" -> "wana"
+
+        let staffName = email;
+        let staffRole = 'unknown';
+        let staffId = null;
+
+        // Try matching by username first (most reliable), then fallback to auth_uid
+        let { data: staff } = await supabase
+            .from('staff')
+            .select('id, first_name, last_name, role')
+            .eq('username', username)
+            .single();
+
+        if (!staff) {
+            // Fallback: try auth_uid match
+            const result = await supabase
+                .from('staff')
+                .select('id, first_name, last_name, role')
+                .eq('auth_uid', session.user.id)
+                .single();
+            staff = result.data;
+        }
+
+        if (staff) {
+            staffId = staff.id;
+            staffName = `${staff.first_name || ''} ${staff.last_name || ''}`.trim() || email;
+            staffRole = staff.role || 'unknown';
+        }
+
+        // 3. Insert the audit log entry
+        const { error } = await supabase.from('audit_logs').insert([{
+            staff_id: staffId,
+            staff_name: staffName,
+            role: staffRole,
+            action_type: actionType,
+            entity_type: entityType,
+            entity_id: String(entityId),
+            details: details,
+            metadata: metadata
+        }]);
+
+        if (error) {
+            console.error('[Audit Log] Failed to insert log:', error);
+        }
+    } catch (e) {
+        console.error('[Audit Log] Exception:', e);
+    }
+};
+const logAuditAction = window.logAuditAction;
 
 // === CUSTOMERS ===
 async function loadCustomers(options = {}) {
@@ -46,11 +107,22 @@ async function loadCustomers(options = {}) {
         // Client-side filtering for search, type, barangay
         const filteredData = data.filter(c => {
             const lowSearch = search.toLowerCase();
+            
+            // Comprehensive name and ID matching
+            const firstName = (c.first_name || '').toLowerCase();
+            const lastName = (c.last_name || '').toLowerCase();
+            const fullName = `${firstName} ${lastName}`;
+            const lastNameFirst = `${lastName}, ${firstName}`;
+            const accountId = getAccountID(c.id).toLowerCase();
+            const meterNo = (c.meter_number || '').toLowerCase();
+            const address = (c.address || '').toLowerCase();
+
             const matchesSearch = !search ||
-                `${c.first_name || ''} ${c.last_name || ''}`.toLowerCase().includes(lowSearch) ||
-                (c.meter_number || '').toLowerCase().includes(lowSearch) ||
-                (c.address || '').toLowerCase().includes(lowSearch) ||
-                getAccountID(c.id).toLowerCase().includes(lowSearch);
+                fullName.includes(lowSearch) ||
+                lastNameFirst.includes(lowSearch) ||
+                accountId.includes(lowSearch) ||
+                meterNo.includes(lowSearch) ||
+                address.includes(lowSearch);
 
             const matchesType = !type || (c.customer_type || '').toLowerCase() === type.toLowerCase();
             const matchesBarangay = !barangay || getBarangay(c.address).toLowerCase() === barangay.toLowerCase();
@@ -58,12 +130,20 @@ async function loadCustomers(options = {}) {
             return matchesSearch && matchesType && matchesBarangay;
         });
 
-        if (filteredData.length === 0) {
+        const totalItems = filteredData.length;
+        const page = options.page || 1;
+        const pageSize = options.pageSize || 20;
+
+        if (totalItems === 0) {
             tbody.innerHTML = `<tr><td colspan="${hideActions ? '7' : '8'}" style="text-align: center; padding: 2rem;">No customers found.</td></tr>`;
-            return;
+            if (window.renderPagination) window.renderPagination('customerPagination', 0, page, pageSize, 'onCustomerPageChange');
+            return { total: 0 };
         }
 
-        tbody.innerHTML = filteredData.map(c => {
+        // Apply pagination (slice the filtered data)
+        const paginatedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
+
+        tbody.innerHTML = paginatedData.map(c => {
             const hasDiscount = c.has_discount;
             const middleInitial = c.middle_initial ? ` ${c.middle_initial}.` : '';
             const displayName = `${c.last_name}, ${c.first_name}${middleInitial}`;
@@ -79,6 +159,7 @@ async function loadCustomers(options = {}) {
                 data-discount="${c.has_discount}"
                 data-address="${c.address}"
                 data-contact="${c.contact_number || ''}"
+                data-age="${c.age || ''}"
                 data-meter-number="${c.meter_number || ''}"
                 data-status="${c.status || 'active'}">
                 <td class="account-id">${getAccountID(c.id)}</td>
@@ -103,6 +184,13 @@ async function loadCustomers(options = {}) {
                 </td>` : ''}
             </tr>
         `}).join('');
+
+        // Render Pagination UI
+        if (window.renderPagination) {
+            window.renderPagination('customerPagination', totalItems, page, pageSize, 'onCustomerPageChange');
+        }
+
+        return { total: totalItems };
 
     } catch (error) {
         console.error('Error loading customers:', error);
@@ -137,6 +225,7 @@ async function addCustomer(customerData) {
                 meter_number: customerData.meterNumber,
                 customer_type: customerData.customerType,
                 meter_size: customerData.meterSize || '1/2"',
+                age: customerData.age,
                 status: customerData.status,
                 has_discount: customerData.discount
             }]);
@@ -148,7 +237,15 @@ async function addCustomer(customerData) {
             throw error;
         }
 
-        showNotification('Customer added successfully', 'success');
+        // --- Audit Log ---
+        await logAuditAction(
+            'CREATE', 
+            'customer', 
+            customerData.meterNumber || 'new', 
+            `Added new customer: ${customerData.firstName} ${customerData.lastName}`
+        );
+
+        // Success handled by UI caller
         if (window.dbOperations && window.dbOperations.loadCustomers) {
             window.dbOperations.loadCustomers();
         }
@@ -157,7 +254,7 @@ async function addCustomer(customerData) {
         }
     } catch (error) {
         console.error('Error adding customer:', error);
-        showNotification(error.message || 'Failed to add customer', 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
@@ -177,12 +274,23 @@ async function updateCustomer(id, customerData) {
                 meter_size: customerData.meterSize || '1/2"',
                 status: customerData.status,
                 has_discount: customerData.discount,
+                age: customerData.age,
                 updated_at: new Date()
             })
             .eq('id', id);
 
         if (error) throw error;
-        showNotification('Customer updated successfully', 'success');
+
+        // --- Audit Log ---
+        await logAuditAction(
+            'UPDATE', 
+            'customer', 
+            id, 
+            `Updated customer profile: ${customerData.firstName} ${customerData.lastName}`,
+            { changed_fields: Object.keys(customerData) }
+        );
+
+        // Success handled by UI caller
         
         // Recalculate unpaid bills for this customer if discount/type changed.
         // Pass currentMonthOnly=false so ALL their pending bills get updated, not just the current month.
@@ -196,7 +304,7 @@ async function updateCustomer(id, customerData) {
         else loadCustomers();
     } catch (error) {
         console.error('Error updating customer:', error);
-        showNotification('Failed to update customer', 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
@@ -209,13 +317,22 @@ async function deleteCustomer(id) {
             .eq('id', id);
 
         if (error) throw error;
-        showNotification('Customer deleted successfully!', 'success');
+
+        // --- Audit Log ---
+        await logAuditAction(
+            'DELETE', 
+            'customer', 
+            id, 
+            `Deleted customer (ID: ${id})`
+        );
+
+        // Success handled by UI caller
         // Preserve active filter/search state when refreshing
         if (window.refreshCustomers) window.refreshCustomers();
         else loadCustomers();
     } catch (error) {
         console.error('Error deleting customer:', error);
-        showNotification('Failed to delete customer', 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
@@ -249,12 +366,20 @@ async function loadStaff(options = {}) {
             return matchesSearch && matchesStatus && matchesRole;
         });
 
-        if (filteredData.length === 0) {
+        const totalItems = filteredData.length;
+        const page = options.page || 1;
+        const pageSize = options.pageSize || 20;
+
+        if (totalItems === 0) {
             tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No staff found.</td></tr>';
-            return;
+            if (window.renderPagination) window.renderPagination('staffPagination', 0, page, pageSize, 'onStaffPageChange');
+            return { total: 0 };
         }
 
-        tbody.innerHTML = filteredData.map(s => `
+        // Apply pagination
+        const paginatedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
+
+        tbody.innerHTML = paginatedData.map(s => `
             <tr data-id="${s.id}"
                 data-last-name="${s.last_name}"
                 data-first-name="${s.first_name}"
@@ -262,6 +387,7 @@ async function loadStaff(options = {}) {
                 data-username="${s.username}"
                 data-role="${s.role}"
                 data-contact="${s.contact_number || ''}"
+                data-age="${s.age || ''}"
                 data-status="${s.status}">
                 <td>#${String(s.id).padStart(3, '0')}</td>
                 <td style="font-weight: 500;">${s.last_name}, ${s.first_name} ${s.middle_initial || ''}</td>
@@ -278,6 +404,12 @@ async function loadStaff(options = {}) {
                 </td>
             </tr>
         `).join('');
+
+        if (window.renderPagination) {
+            window.renderPagination('staffPagination', totalItems, page, pageSize, 'onStaffPageChange');
+        }
+
+        return { total: totalItems };
     } catch (error) {
         console.error('Error loading staff:', error);
         tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to load staff</td></tr>';
@@ -307,7 +439,8 @@ async function addStaff(staffData) {
                 role: staffData.role,
                 contact_number: staffData.contact,
                 username: staffData.username,
-                status: staffData.status || 'active'
+                age: staffData.age,
+                status: staffData.status || 'inactive'
             }]);
 
         if (error) {
@@ -317,11 +450,19 @@ async function addStaff(staffData) {
             throw error;
         }
 
-        showNotification(`Staff member added successfully`, 'success');
+        // --- Audit Log ---
+        await logAuditAction(
+            'CREATE', 
+            'staff', 
+            staffData.username, 
+            `Added new staff member: ${staffData.firstName} ${staffData.lastName} (${staffData.role})`
+        );
+
+        // Success handled by UI caller
         loadStaff();
     } catch (error) {
         console.error('Error adding staff:', error);
-        showNotification(error.message, 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
@@ -335,6 +476,7 @@ async function updateStaff(id, staffData) {
             role: staffData.role,
             contact_number: staffData.contact,
             status: staffData.status,
+            age: staffData.age,
             updated_at: new Date()
         };
 
@@ -346,63 +488,74 @@ async function updateStaff(id, staffData) {
             .eq('id', id);
 
         if (error) throw error;
-        showNotification('Staff updated successfully', 'success');
+
+        // --- Audit Log ---
+        await logAuditAction(
+            'UPDATE', 
+            'staff', 
+            id, 
+            `Updated staff profile: ${staffData.firstName} ${staffData.lastName} (${staffData.role})`,
+            { changed_fields: Object.keys(updateData) }
+        );
+
+        // Success handled by UI caller
         loadStaff();
     } catch (error) {
         console.error('Error updating staff:', error);
-        showNotification(error.message || 'Failed to update staff', 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
 
 async function deleteStaff(id) {
-    const doDelete = async () => {
-        try {
-            // 1. Get auth_uid first (Secure Deletion)
-            const { data: staff, error: fetchError } = await supabase
-                .from('staff')
-                .select('auth_uid')
-                .eq('id', id)
-                .single();
+    try {
+        // 1. Get auth_uid first (Secure Deletion)
+        const { data: staff, error: fetchError } = await supabase
+            .from('staff')
+            .select('auth_uid')
+            .eq('id', id)
+            .single();
 
-            if (fetchError) throw fetchError;
+        if (fetchError) throw fetchError;
 
-            if (staff.auth_uid) {
-                // 2. Call Edge Function to delete Auth User (prevents future logins)
-                const { data, error: deleteParamError } = await supabase.functions.invoke('delete-user', {
-                    body: { uid: staff.auth_uid }
-                });
+        if (staff.auth_uid) {
+            // 2. Call Edge Function to delete Auth User (prevents future logins)
+            const { data, error: deleteParamError } = await supabase.functions.invoke('delete-user', {
+                body: { uid: staff.auth_uid }
+            });
 
-                if (deleteParamError) {
-                    console.error("Failed to delete auth user (Network/System):", deleteParamError);
-                } else if (!data || !data.success) {
-                    console.error("Failed to delete auth user (Logic):", data?.error);
-                } else {
-                    console.log("Auth user deleted successfully");
-                }
+            if (deleteParamError) {
+                console.error("Failed to delete auth user (Network/System):", deleteParamError);
+            } else if (!data || !data.success) {
+                console.error("Failed to delete auth user (Logic):", data?.error);
+            } else {
+                console.log("Auth user deleted successfully");
             }
-
-            // 3. Delete from staff table
-            const { error } = await supabase
-                .from('staff')
-                .delete()
-                .eq('id', id);
-
-            if (error) throw error;
-            showNotification('Staff deleted successfully!', 'success');
-            loadStaff();
-        } catch (error) {
-            console.error('Error deleting staff:', error);
-            showNotification('Failed to delete staff', 'error');
         }
-    };
 
-    window.showConfirmModal({
-        title: 'Delete Staff Member?',
-        message: 'Are you sure you want to delete this staff member? This will also remove their login access. This action cannot be undone.',
-        confirmText: 'Delete Forever',
-        onConfirm: doDelete
-    });
+        // 3. Delete from staff table
+        const { error } = await supabase
+            .from('staff')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+
+        // --- Audit Log ---
+        await logAuditAction(
+            'DELETE', 
+            'staff', 
+            id, 
+            `Deleted staff member (ID: ${id})`
+        );
+
+        // Success handled by UI caller
+        loadStaff();
+    } catch (error) {
+        console.error('Error deleting staff:', error);
+        // Error thrown and handled by UI caller
+        throw error; // Ensure error propogates
+    }
 }
 
 async function changeStaffPassword(staffId, newPassword) {
@@ -461,12 +614,12 @@ async function changeStaffPassword(staffId, newPassword) {
             throw new Error(data.error || 'Operation failed');
         }
 
-        showNotification(`Password updated for ${staff.first_name}`, 'success');
+        // Success handled by UI caller
         closeModal('changePasswordModal');
 
     } catch (error) {
         console.error('DEEP DEBUG ERROR:', error);
-        showNotification(error.message, 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
@@ -570,10 +723,10 @@ async function loadBilling(filters = {}) {
             // Compare normalized versions so "Mar 2026" matches "March 2026"
             const searchMonth = normalizePeriod(month);
             
-            filteredData = filteredData.filter(b => {
-                // Compare strictly by billing_period for consistency
-                return normalizePeriod(b.billing_period) === searchMonth;
-            });
+                // EXCLUSIVE FIX: Filter primarily by Reading Date to match user expectation in the table
+                const readingDateMatch = normalizePeriod(formatLocalDateTime(b.updated_at || b.reading_date, false)) === searchMonth;
+                
+                return readingDateMatch;
         }
 
         // Apply barangay filter (client-side, on customer address)
@@ -584,15 +737,17 @@ async function loadBilling(filters = {}) {
             });
         }
 
-        // Populate Month Dropdown (normalized, deduplicated)
+        // Populate Month Dropdown (normalized, deduplicated from Reading Dates)
         const monthSelect = document.getElementById('billingMonthFilter');
         if (monthSelect && monthSelect.children.length <= 1) {
-            const rawPeriods = data.map(b => b.billing_period).filter(Boolean);
             const normalizedSet = new Set();
             
-            rawPeriods.forEach(p => {
-                const key = normalizePeriod(p);
-                if (key) normalizedSet.add(key);
+            data.forEach(b => {
+                const rdStr = b.updated_at || b.reading_date;
+                if (rdStr) {
+                    const key = normalizePeriod(formatLocalDateTime(rdStr, false));
+                    if (key) normalizedSet.add(key);
+                }
             });
             
             const sortedKeys = Array.from(normalizedSet).sort((a, b) => {
@@ -612,10 +767,22 @@ async function loadBilling(filters = {}) {
 
         if (filteredData.length === 0) {
             tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">No billing records found.</td></tr>';
-            return;
+            if (window.renderPagination) {
+                const page = filters.page || 1;
+                const pageSize = filters.pageSize || 20;
+                window.renderPagination('billingPagination', 0, page, pageSize, 'onBillingPageChange');
+            }
+            return { total: 0 };
         }
 
-        tbody.innerHTML = filteredData.map(bill => {
+        const totalItems = filteredData.length;
+        const page = filters.page || 1;
+        const pageSize = filters.pageSize || 20;
+
+        // Apply pagination
+        const paginatedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
+
+        tbody.innerHTML = paginatedData.map(bill => {
             const customer = bill.customers;
             const middleInitial = customer?.middle_initial ? ` ${customer.middle_initial}.` : '';
             const customerName = customer ? `${customer.last_name}, ${customer.first_name}${middleInitial}` : 'Unknown';
@@ -691,6 +858,11 @@ async function loadBilling(filters = {}) {
             </tr>
         `}).join('');
 
+        if (window.renderPagination) {
+            window.renderPagination('billingPagination', totalItems, page, pageSize, 'onBillingPageChange');
+        }
+
+        return { total: totalItems };
     } catch (error) {
         console.error('Error loading billing:', error);
         tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">Failed to load billing</td></tr>';
@@ -1134,11 +1306,11 @@ async function addAreaBox(boxData) {
             }]);
 
         if (error) throw error;
-        showNotification('Area Box created successfully', 'success');
+        // Success handled by UI caller
         loadAreaBoxes();
     } catch (error) {
         console.error('Error adding area box:', error);
-        showNotification('Failed to create box', 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
@@ -1157,11 +1329,11 @@ async function updateAreaBox(id, boxData) {
             .eq('id', id);
 
         if (error) throw error;
-        showNotification('Area Box updated', 'success');
+        // Success handled by UI caller
         loadAreaBoxes();
     } catch (error) {
         console.error('Error updating area box:', error);
-        showNotification('Update failed', 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
@@ -1179,11 +1351,11 @@ async function deleteAreaBox(id) {
                     .eq('id', id);
 
                 if (error) throw error;
-                showNotification('Area Box deleted', 'success');
+                // Success handled by UI caller
                 loadAreaBoxes();
             } catch (error) {
                 console.error('Error deleting area box:', error);
-                showNotification('Delete failed', 'error');
+                // Error handled by UI caller
             }
         }
     });
@@ -1266,7 +1438,17 @@ async function updateSystemSettings(settingsData) {
             throw error;
         }
         if (error) throw error;
-        showNotification('System settings updated', 'success');
+
+        // --- Audit Log ---
+        await logAuditAction(
+            'UPDATE', 
+            'system_settings', 
+            id, 
+            `Updated system settings.`,
+            { changed_fields: Object.keys(dataToUpdate) }
+        );
+
+        // Success handled by UI caller
         
         // Recalculate ALL unpaid bills to reflect new rates/discounts
         console.log('[updateSystemSettings] Triggering global recalculation...');
@@ -1275,7 +1457,7 @@ async function updateSystemSettings(settingsData) {
         return true;
     } catch (error) {
         console.error('Error updating system settings:', error);
-        showNotification('Failed to update settings', 'error');
+        // Error thrown and handled by UI caller
         throw error;
     }
 }
@@ -1461,7 +1643,7 @@ async function loadMasterLedger(options = {}) {
         //    otherwise fetch all unpaid to calculate outstanding balances.
         let billQuery = supabase
             .from('billing')
-            .select('customer_id, amount, billing_period, due_date, status');
+            .select('customer_id, amount, billing_period, due_date, status, updated_at, reading_date');
 
         // Note: We fetch all relevant bills and filter client-side to handle normalization
         // and due date matching consistently with the main billing list.
@@ -1494,22 +1676,35 @@ async function loadMasterLedger(options = {}) {
                 accountId.includes(lowSearch) ||
                 meterNo.includes(lowSearch);
 
-            const searchMonth = period ? normalizePeriod(period) : null;
-            const matchesPeriod = !searchMonth || unpaidBills.some(b => {
+            // When a period is selected, only show customers who have a matching bill in that period
+            // (Using normalized matching for period or due date month)
+            const matchesPeriod = !period || unpaidBills.some(b => {
                 if (b.customer_id !== c.id) return false;
-                // Strict match on billing_period only
-                return normalizePeriod(b.billing_period) === searchMonth;
+                
+                const searchMonth = normalizePeriod(period);
+                // EXCLUSIVE FIX: Filter solely by reading date for consistency
+                const readingDateMatch = normalizePeriod(formatLocalDateTime(b.updated_at || b.reading_date, false)) === searchMonth;
+                
+                return readingDateMatch;
             });
 
             return matchesBarangay && matchesSearch && matchesPeriod;
         });
 
-        if (filtered.length === 0) {
+        const totalItems = filtered.length;
+        const page = options.page || 1;
+        const pageSize = options.pageSize || 20;
+
+        if (totalItems === 0) {
             tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No customers found in directory.</td></tr>';
-            return;
+            if (window.renderPagination) window.renderPagination('ledgerPagination', 0, page, pageSize, 'onLedgerPageChange');
+            return { total: 0 };
         }
 
-        tbody.innerHTML = filtered.map(c => {
+        // Apply pagination
+        const paginatedData = options.fullList ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
+
+        tbody.innerHTML = paginatedData.map(c => {
             const balance = balanceMap[c.id] || 0;
             const isInactive = (c.status || '').toLowerCase() === 'inactive';
             
@@ -1540,6 +1735,14 @@ async function loadMasterLedger(options = {}) {
             </tr>
             `;
         }).join('');
+
+        // Render Pagination UI
+        if (window.renderPagination) {
+            const containerId = options.containerId || 'ledgerPagination';
+            window.renderPagination(containerId, totalItems, page, pageSize, 'onLedgerPageChange');
+        }
+
+        return { total: totalItems };
 
     } catch (error) {
         console.error('Error loading Master Ledger:', error);
@@ -1714,8 +1917,7 @@ async function loadReadingList(options = {}) {
                 customers!inner (
                     id, last_name, first_name, middle_initial, address, meter_number, has_discount, status, disconnection_date, disconnection_bill_id
                 )
-            `)
-            .order('id', { ascending: false });
+            `);
 
         // Apply filters
         if (barangay) {
@@ -1723,13 +1925,24 @@ async function loadReadingList(options = {}) {
         }
 
         if (search) {
-            const searchPattern = `%${search}%`;
-            query = query.or(`customers.first_name.ilike.${searchPattern},customers.last_name.ilike.${searchPattern},customers.meter_number.ilike.${searchPattern}`);
-        }
+            // Broaden server-side filter: use first word if name combo, plus numeric ID check
+            const terms = search.split(/[ ,]+/).filter(t => t.length > 0);
+            const primaryTerm = terms[0] || '';
+            
+            let orParts = [
+                `first_name.ilike.%${primaryTerm}%`,
+                `last_name.ilike.%${primaryTerm}%`,
+                `meter_number.ilike.%${search}%`
+            ];
 
-        // Period filtering is handled CLIENT-SIDE ONLY (after fetch) 
-        // because billing_period is stored in multiple formats (e.g. "Mar 2026", "March 2026")
-        // and server-side .eq()/.or() cannot reliably match all variants.
+            // If it's a number or contains digits, try matching ID
+            const numericId = search.replace(/\D/g, '');
+            if (numericId && numericId.length > 0) {
+                orParts.push(`id.eq.${numericId}`);
+            }
+
+            query = query.or(orParts.join(','), { foreignTable: 'customers' });
+        }
 
         const { data: bills, error: bError } = await query;
         if (bError) throw bError;
@@ -1739,61 +1952,64 @@ async function loadReadingList(options = {}) {
             return;
         }
 
-        // 2. Client-side Period Filter (handles format variations like "Mar 2026" vs "March 2026")
+        // 2. Client-side normalization and filtering
         const searchMonth = period ? normalizePeriod(period) : null;
         let filteredBills = bills;
         
-        if (searchMonth) {
-            console.log('[ReadingList] Filtering for period:', searchMonth, '| Total bills:', bills.length);
-            filteredBills = bills.filter(b => {
-                const normalized = normalizePeriod(b.billing_period);
-                return normalized === searchMonth;
-            });
-            console.log('[ReadingList] After filter:', filteredBills.length, 'matching bills');
-        }
-
-        // If period filter produced no results, show empty message
-        if (filteredBills.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 3rem; color: #9E9E9E;">No readings found for ${period || 'the selected filters'}.</td></tr>`;
-            return;
-        }
-
-        // 3. Group by Customer to prevent duplicates (Latest Reading ONLY)
-        const customerMap = new Map();
-        
-        filteredBills.forEach(b => {
-            const cid = b.customer_id;
-            // If multiple records exist for this customer, only keep the NEWEST one
-            if (!customerMap.has(cid) || new Date(b.updated_at || b.created_at) > new Date(customerMap.get(cid).rawTimestamp)) {
+        // Apply secondary client-side search filter for precise name/account matching
+        if (search) {
+            const lowSearch = search.toLowerCase();
+            filteredBills = filteredBills.filter(b => {
                 const c = b.customers;
-                const fullName = `${c.last_name}, ${c.first_name}${c.middle_initial ? ' ' + c.middle_initial + '.' : ''}`;
-                const dateRead = formatLocalDateTime(b.updated_at || b.reading_date, true);
-                
-                customerMap.set(cid, {
-                    id: b.id,
-                    billingId: b.id,
-                    billNo: b.bill_no,
-                    customerId: c.id,
-                    fullName: fullName,
-                    meterNo: c.meter_number,
-                    address: c.address,
-                    prev: b.previous_reading || 0,
-                    curr: b.current_reading || 0,
-                    usage: b.consumption || 0,
-                    date: dateRead,
-                    barangay: getBarangay(c.address),
-                    status: b.status || 'unpaid',
-                    due_date: b.due_date,
-                    is_overdue: b.is_overdue || false,
-                    customer_status: c.status || 'active',
-                    disconnection_bill_id: c.disconnection_bill_id,
-                    updated_at: b.updated_at || b.created_at || b.reading_date,
-                    rawTimestamp: b.updated_at || b.created_at || b.reading_date
-                });
-            }
-        });
+                const firstName = (c.first_name || '').toLowerCase();
+                const lastName = (c.last_name || '').toLowerCase();
+                const fullName = `${firstName} ${lastName}`;
+                const lastNameFirst = `${lastName}, ${firstName}`;
+                const accountId = getAccountID(c.id).toLowerCase();
+                const meterNo = (c.meter_number || '').toLowerCase();
 
-        const renderedList = Array.from(customerMap.values());
+                // Advanced matching including formatted account ID, full name variants, etc.
+                return fullName.includes(lowSearch) || 
+                       lastNameFirst.includes(lowSearch) || 
+                       accountId === lowSearch ||
+                       accountId.includes(lowSearch) || 
+                       meterNo.includes(lowSearch);
+            });
+        }
+
+        if (searchMonth) {
+            filteredBills = filteredBills.filter(b => {
+                // EXCLUSIVE FIX: Filter solely by actual reading date (what the user sees in the table)
+                return normalizePeriod(formatLocalDateTime(b.updated_at || b.reading_date, false)) === searchMonth;
+            });
+        }
+
+        // 3. Map for display
+        const renderedList = filteredBills.map(b => {
+            const c = b.customers;
+            const fullName = `${c.last_name}, ${c.first_name}${c.middle_initial ? ' ' + c.middle_initial + '.' : ''}`;
+            const dateRead = formatLocalDateTime(b.updated_at || b.reading_date, false);
+            
+            return {
+                billNo: b.bill_no,
+                billingId: b.id,
+                customerId: c.id,
+                fullName: fullName,
+                meterNo: c.meter_number,
+                address: c.address,
+                prev: b.previous_reading || 0,
+                curr: b.current_reading || 0,
+                usage: b.consumption || 0,
+                date: dateRead,
+                barangay: getBarangay(c.address),
+                status: b.status || 'unpaid',
+                due_date: b.due_date,
+                is_overdue: b.is_overdue || false,
+                customer_status: c.status || 'active',
+                disconnection_bill_id: c.disconnection_bill_id,
+                updated_at: b.updated_at || b.created_at || b.reading_date
+            };
+        });
 
         // 3.1 Apply precise client-side barangay/reader filter if specified
         let finalRenderedList = renderedList;
@@ -1830,7 +2046,20 @@ async function loadReadingList(options = {}) {
             return 0;
         });
 
-        tbody.innerHTML = finalRenderedList.map(item => {
+        const totalItems = finalRenderedList.length;
+        const page = options.page || 1;
+        const pageSize = options.pageSize || 20;
+
+        if (totalItems === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 3rem; color: #9E9E9E;">No readings found matching filters.</td></tr>`;
+            if (window.renderPagination) window.renderPagination('readingListPagination', 0, page, pageSize, 'onReadingListPageChange');
+            return { total: 0 };
+        }
+
+        // Apply pagination
+        const paginatedData = options.fullList ? finalRenderedList : finalRenderedList.slice((page - 1) * pageSize, page * pageSize);
+
+        tbody.innerHTML = paginatedData.map(item => {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             
@@ -1845,13 +2074,13 @@ async function loadReadingList(options = {}) {
                 }
             }
 
-        if (item.customer_status.toLowerCase() === 'inactive' || item.customer_status.toLowerCase() === 'disconnected') {
-            displayStatus = 'Disconnected';
-            statusClass = 'disconnected';
-        } else if (item.disconnection_bill_id === item.id) {
-            displayStatus = 'Disconnected';
-            statusClass = 'disconnected';
-        }
+            if (item.customer_status.toLowerCase() === 'inactive' || item.customer_status.toLowerCase() === 'disconnected') {
+                displayStatus = 'Disconnected';
+                statusClass = 'disconnected';
+            } else if (item.disconnection_bill_id === item.billingId) {
+                displayStatus = 'Disconnected';
+                statusClass = 'disconnected';
+            }
 
             return `
             <tr>
@@ -1871,8 +2100,13 @@ async function loadReadingList(options = {}) {
                     <span class="mono" style="font-size: 0.75rem; color: #9E9E9E; display: block; margin-top: 4px;">#${String(item.billNo || item.billingId).padStart(4, '0')}</span>
                 </td>
             </tr>
-        `}).join('');
+        `; }).join('');
 
+        if (window.renderPagination) {
+            window.renderPagination('readingListPagination', totalItems, page, pageSize, 'onReadingListPageChange');
+        }
+
+        return { total: totalItems };
     } catch (error) {
         console.error('Error loading reading list:', error);
         tbody.innerHTML = `<tr><td colspan="8" class="text-danger center">Failed to load reading list: ${error.message}</td></tr>`;
@@ -2281,11 +2515,20 @@ async function updateReading(billingId, newCurrentReading, customerId, targetPer
             if (insertError) throw insertError;
         }
         
-        showNotification(billingId ? 'Bill updated' : 'New bill generated', 'success');
+        // --- Audit Log ---
+        await logAuditAction(
+            isUpdate ? 'UPDATE' : 'CREATE', 
+            'billing', 
+            billingId || 'new', 
+            `${isUpdate ? 'Updated' : 'Generated'} reading for account: ${customer?.first_name} ${customer?.last_name}`,
+            { previous: prevReading, current: newCurrentReading, consumption: newConsumption }
+        );
+
+        // showNotification(billingId ? 'Bill updated' : 'New bill generated', 'success'); // Removed duplicate
         return true;
     } catch (error) {
         console.error('Error updating/generating reading:', error);
-        showNotification(error.message, 'error');
+        // showNotification(error.message, 'error'); // Handled by caller
         throw error;
     }
 }
@@ -2424,7 +2667,7 @@ async function recalculateUnpaidBills(targetCustomerId = null, currentMonthOnly 
 
     } catch (error) {
         console.error('[recalculateUnpaidBills] CRITICAL ERROR:', error);
-        showNotification('Recalculation error: ' + error.message, 'error');
+        // showNotification('Recalculation error: ' + error.message, 'error'); // Handled by caller
     }
 }
 
@@ -2458,3 +2701,4 @@ function _liveRefreshBillingUI() {
         window.updateReadingList();
     }
 }
+

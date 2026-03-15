@@ -5,6 +5,33 @@ let logDataCache = [];
 let customerSortConfig = { key: 'id', order: 'asc' };
 let currentCashierLedgerCustomerId = null; // Track which customer's ledger is open
 
+// Pagination State
+let customerPagination = { page: 1, pageSize: 20 };
+let billingPagination = { page: 1, pageSize: 20 };
+let logPagination = { page: 1, pageSize: 20 };
+let ledgerPagination = { page: 1, pageSize: 20 };
+
+// Pagination Callbacks
+window.onCustomerPageChange = (page) => {
+    customerPagination.page = page;
+    refreshCustomers(true);
+};
+
+window.onBillingPageChange = (page) => {
+    billingPagination.page = page;
+    loadBilling(true);
+};
+
+window.onLogPageChange = (page) => {
+    logPagination.page = page;
+    loadCollectionRecords(true);
+};
+
+window.onLedgerPageChange = (page) => {
+    ledgerPagination.page = page;
+    if (window.updateCashierLedger) window.updateCashierLedger(true);
+};
+
 function initializeSorting() {
     // Customer Table Sorting
     const customerHeaders = {
@@ -87,7 +114,9 @@ function initializeSidebar() {
     });
 }
 
-function refreshCustomers() {
+function refreshCustomers(keepPage = false) {
+    if (!keepPage) customerPagination.page = 1;
+
     const search = document.getElementById('customerSearch')?.value || '';
     const status = document.getElementById('customerStatusFilter')?.value || '';
     const type = document.getElementById('customerTypeFilter')?.value || '';
@@ -102,6 +131,8 @@ function refreshCustomers() {
             barangay,
             sortBy: customerSortConfig.key,
             sortOrder: customerSortConfig.order,
+            page: customerPagination.page,
+            pageSize: customerPagination.pageSize,
             hideActions: true
         });
     }
@@ -654,7 +685,9 @@ async function loadRecentCollections() {
 }
 
 
-async function loadBilling() {
+async function loadBilling(keepPage = false) {
+    if (!keepPage) billingPagination.page = 1;
+
     const body = document.getElementById('billingTableBody');
     const search = document.getElementById('billingSearch')?.value || '';
     const status = document.getElementById('billingStatusFilter')?.value || '';
@@ -748,20 +781,28 @@ async function loadBilling() {
             const term = search.toLowerCase();
 
             return (
-                billNoStr.includes(term) ||
+                term.includes(billNoStr) ||
                 formattedBillId.includes(term) ||
                 fullName.includes(term) ||
                 meterNo.includes(term) ||
                 accountId.includes(term)
             );
         });
+        
+        const totalItems = finalResults.length;
+        const page = billingPagination.page;
+        const pageSize = billingPagination.pageSize;
 
-        if (finalResults.length === 0) {
+        if (totalItems === 0) {
             body.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #9E9E9E;">No billing records match search.</td></tr>';
+            if (window.renderPagination) window.renderPagination('billingPagination', 0, page, pageSize, 'onBillingPageChange');
             return;
         }
 
-        body.innerHTML = finalResults.map(bill => {
+        // Apply Pagination
+        const paginatedData = finalResults.slice((page - 1) * pageSize, page * pageSize);
+
+        body.innerHTML = paginatedData.map(bill => {
             const customer = searchCustomerMap[bill.customer_id] || { first_name: 'Unknown', last_name: 'Customer' };
             const isInactive = (customer.status || '').toLowerCase() === 'inactive'; // New logic
             let statusClass = 'status-warning';
@@ -808,10 +849,22 @@ async function loadBilling() {
                                             <span>Current Charge</span> 
                                             <span>₱${(parseFloat(bill.base_charge || 0) + parseFloat(bill.consumption_charge || 0) || (parseFloat(bill.amount) - parseFloat(bill.arrears || 0))).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                                         </div>
+                                        ${parseFloat(bill.penalty || 0) > 0 ? `
+                                            <div class="tooltip-row">
+                                                <span>Penalty</span> 
+                                                <span>₱${parseFloat(bill.penalty).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                            </div>
+                                        ` : ''}
                                         <div class="tooltip-row">
                                             <span>Arrears</span> 
                                             <span>₱${parseFloat(bill.arrears || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                                         </div>
+                                        ${customer.has_discount ? `
+                                            <div class="tooltip-row text-primary" style="font-weight: 600;">
+                                                <span>SC Discount (${settings.discount_percentage || 5}%)</span> 
+                                                <span>-₱${((parseFloat(bill.base_charge || 0) + parseFloat(bill.consumption_charge || 0)) * ((settings.discount_percentage || 5) / 100)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                            </div>
+                                        ` : ''}
                                         <div class="tooltip-footer">
                                             <span>Subtotal</span>
                                             <span>₱${parseFloat(bill.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -854,6 +907,11 @@ async function loadBilling() {
                 </tr>
             `;
         }).join('');
+
+        // Render Pagination UI
+        if (window.renderPagination) {
+            window.renderPagination('billingPagination', totalItems, page, pageSize, 'onBillingPageChange');
+        }
     } catch (error) {
         console.error('Error loading billing:', error.message || error);
         showNotification('Failed to load billing records', 'error');
@@ -1121,7 +1179,9 @@ async function loadBillingMonths() {
         console.error('Error loading periods:', error);
     }
 }
-async function loadCollectionRecords() {
+async function loadCollectionRecords(keepPage = false) {
+    if (!keepPage) logPagination.page = 1;
+
     const body = document.getElementById('collectionLogBody');
     const totalEl = document.getElementById('logTotalAmount');
     const countEl = document.getElementById('logTotalCount');
@@ -1195,23 +1255,20 @@ async function loadCollectionRecords() {
             if (barangay && !u.address.toLowerCase().includes(barangay.toLowerCase())) return false;
 
             if (!search) return true;
-            const term = search.toLowerCase();
-            return u.customerName.toLowerCase().includes(term) ||
-                u.accountID.toLowerCase().includes(term) ||
-                u.ref.toLowerCase().includes(term);
         });
-
-        renderLogRecords();
-
+        
+        renderLogRecords(keepPage);
     } catch (error) {
         console.error('Error loading records:', error);
     }
 }
 
-function renderLogRecords() {
+function renderLogRecords(keepPage = false) {
     const body = document.getElementById('collectionLogBody');
     const totalEl = document.getElementById('logTotalAmount');
     const countEl = document.getElementById('logTotalCount');
+    
+    if (!keepPage) logPagination.page = 1;
 
     // Apply sorting
     const data = [...logDataCache].sort((a, b) => {
@@ -1228,15 +1285,22 @@ function renderLogRecords() {
         return 0;
     });
 
+    const totalItems = data.length;
+    const page = logPagination.page;
+    const pageSize = logPagination.pageSize;
+
+    // Apply Pagination
+    const paginatedData = data.slice((page - 1) * pageSize, page * pageSize);
+
     let total = 0;
     let html = '';
     let lastDate = '';
 
     // Bill number is a sequential count of recorded payments (not the DB id)
     // Data is sorted descending (newest first), so first item = highest bill number
-    let billCounter = data.length;
+    let billCounter = data.length - ((page - 1) * pageSize);
 
-    data.forEach(u => {
+    paginatedData.forEach(u => {
         total += parseFloat(u.amount);
 
         // Grouping logic
@@ -1279,8 +1343,12 @@ function renderLogRecords() {
     });
 
     if (totalEl) totalEl.textContent = `₱${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
-    if (countEl) countEl.textContent = data.length.toLocaleString();
+    if (countEl) countEl.textContent = totalItems.toLocaleString();
     if (body) body.innerHTML = html;
+
+    if (window.renderPagination) {
+        window.renderPagination('logPagination', totalItems, page, pageSize, 'onLogPageChange');
+    }
 }
 
 function setLogSort(key) {
@@ -1355,18 +1423,22 @@ function initializeLedgerPage() {
     // Populate Period filter
     populateLedgerPeriodFilter();
 
-    // Event Listeners
-    const updateLedger = () => {
+    // Expose for external realtime refreshes
+    const updateLedger = (keepPage = false) => {
+        if (!keepPage) ledgerPagination.page = 1;
+
         if (window.dbOperations && window.dbOperations.loadMasterLedger) {
             window.dbOperations.loadMasterLedger({
                 barangay: barangayFilter?.value || '',
                 search: searchInput?.value || '',
-                period: periodFilter?.value || ''
+                period: periodFilter?.value || '',
+                page: ledgerPagination.page,
+                pageSize: ledgerPagination.pageSize,
+                containerId: 'ledgerMasterPagination'
             });
         }
     };
 
-    // Expose for external realtime refreshes
     window.updateCashierLedger = updateLedger;
 
     barangayFilter?.addEventListener('change', updateLedger);

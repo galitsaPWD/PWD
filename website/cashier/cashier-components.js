@@ -289,6 +289,13 @@
                                 </div>
                                 ` : ''}
 
+                                ${customer.has_discount ? `
+                                <div class="info-row text-primary">
+                                    <span>SC Discount (${settings.discount_percentage || 5}%):</span>
+                                    <strong>-₱${((parseFloat(bill.base_charge || 0) + parseFloat(bill.consumption_charge || 0)) * ((settings.discount_percentage || 5) / 100)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>
+                                </div>
+                                ` : ''}
+
                                 <div class="info-row total-row" style="margin-top: 5px; font-size: 1.1em; border-top: 1px solid #ddd; padding-top: 5px;">
                                     <span>Total Due:</span>
                                     <strong class="text-primary" style="font-size: 1.3rem;">₱${totalDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong>

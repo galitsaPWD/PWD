@@ -79,6 +79,17 @@
             });
 
             if (rpcError) throw rpcError;
+
+            // --- Audit Log ---
+            if (window.logAuditAction) {
+                await window.logAuditAction(
+                    'CREATE',
+                    'billing',
+                    result || 'new',
+                    `Cashier generated manual bill for customer ID: ${customerId}`
+                );
+            }
+
             return result;
         } catch (error) {
             console.error('Cashier DB Error generating bill:', error);
@@ -141,6 +152,16 @@
                     .eq('id', paymentId);
                 
                 if (error) throw error;
+                
+                // --- Audit Log ---
+                if (window.logAuditAction) {
+                    await window.logAuditAction(
+                        'UPDATE',
+                        'payment',
+                        paymentId,
+                        `Verified online payment for Bill ID: ${payment.bill_id} (Ref: ${payment.reference_number})`
+                    );
+                }
             } else {
                 const { error } = await supabase
                     .from('online_payments')
@@ -148,6 +169,16 @@
                     .eq('id', paymentId);
                 
                 if (error) throw error;
+                
+                // --- Audit Log ---
+                if (window.logAuditAction) {
+                    await window.logAuditAction(
+                        'UPDATE',
+                        'payment',
+                        paymentId,
+                        `Rejected online payment`
+                    );
+                }
             }
             return true;
         } catch (error) {
@@ -167,6 +198,18 @@
             });
 
             if (error) throw error;
+
+            // --- Audit Log ---
+            if (window.logAuditAction) {
+                const billRef = `#BIL-${String(billId).padStart(3, '0')}`;
+                await window.logAuditAction(
+                    'PAYMENT',
+                    'billing',
+                    billId,
+                    `Processed ${method} payment of ₱${amount} for ${billRef}${reference ? ` (Ref: ${reference})` : ''}`
+                );
+            }
+
             return true;
         } catch (error) {
             console.error('Finalize Payment Error:', error);
@@ -181,6 +224,17 @@
             });
 
             if (error) throw error;
+
+            // --- Audit Log ---
+            if (window.logAuditAction) {
+                await window.logAuditAction(
+                    'UPDATE',
+                    'customer',
+                    customerId,
+                    `Cashier reactivated customer account (ID: ${customerId})`
+                );
+            }
+
             return true;
         } catch (error) {
             console.error('Error reactivating customer:', error);

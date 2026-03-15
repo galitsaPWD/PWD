@@ -108,7 +108,7 @@
             const totalDue = baseRate + consumptionCharge + penalty + arrears - discountAmount;
 
             // 8. Cut-off Logic (Maintain existing logic)
-            const cutoffDays = parseInt(settings.cutoff_days) || parseInt(settings.cutoff_grace_period) || 17;
+            const cutoffDays = parseInt(settings.cutoff_days) || 17;
             const overdueDays = parseInt(settings.overdue_days) || 14;
             const delayAfterOverdue = cutoffDays - overdueDays;
             const cutoffDate = new Date(dueDate);
@@ -243,7 +243,7 @@
                                 <label>Cashier / Collector</label>
                             </div>
                             <div class="serial-number">
-                                № <span class="serial-red">${bill.receipt_no ? `RCP-${new Date(bill.payment_date || bill.updated_at).getFullYear()}-${String(bill.receipt_no).padStart(4, '0')}` : String(bill.bill_no || bill.id).padStart(6, '0')}</span>
+                                № <span class="serial-red">${String(bill.bill_no || bill.id).padStart(6, '0')}</span>
                             </div>
                         </div>
                     </div>
@@ -298,8 +298,7 @@
 
                     <div class="receipt-id-row">
                         <div style="display: flex; flex-direction: column; gap: 4px;">
-                            <span>#BIL-${String(bill.bill_no || bill.id).padStart(4, '0')}</span>
-                            ${bill.receipt_no ? `<span style="font-size: 0.8em; color: var(--success);">#RCP-${new Date(bill.payment_date || bill.updated_at).getFullYear()}-${String(bill.receipt_no).padStart(4, '0')}</span>` : ''}
+                            <span>${String(bill.bill_no || bill.id).padStart(6, '0')}</span>
                         </div>
                         <span>${new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}</span>
                     </div>

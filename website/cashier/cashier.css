@@ -4,12 +4,12 @@
 :root {
     --scrollbar-track: transparent;
     --scrollbar-thumb: rgba(100, 116, 139, 0.4); /* Glass UI Slate */
-    --scrollbar-thumb-hover: var(--cashier-primary, #00897B);
+    --scrollbar-thumb-hover: var(--cashier-primary, #0288D1);
 }
 
 .dark-theme, body.dark-theme {
     --scrollbar-thumb: rgba(255, 255, 255, 0.2); /* Frosted Glass */
-    --scrollbar-thumb-hover: var(--cashier-primary, #00BFA5); /* Bright teal on dark mode */
+    --scrollbar-thumb-hover: var(--cashier-primary, #03A9F4); /* Bright blue on dark mode */
 }
 
 /* Target scrolling containers explicitly to bypass Chrome body bugs */
@@ -178,9 +178,9 @@ html.dark-theme, body.dark-theme {
 
 /* Root Variables */
 :root {
-    --cashier-primary: #00897B;
-    /* Teal specialized color */
-    --cashier-accent: #00BFA5;
+    --cashier-primary: #0288D1;
+    /* Synced with Admin primary blue */
+    --cashier-accent: #03A9F4;
 
     --sidebar-width: 260px;
     --sidebar-mini-width: 80px;
@@ -363,8 +363,8 @@ tr.status-inactive .mono {
 
 /* Customizations for the Cashier view stats */
 .stat-icon.blue {
-    background: rgba(0, 137, 123, 0.1);
-    color: #00897B;
+    background: rgba(2, 136, 209, 0.1);
+    color: #0288D1;
 }
 
 /* === SIDEBAR (Sync with Admin) === */
@@ -478,7 +478,7 @@ tr.status-inactive .mono {
     visibility: hidden;
     pointer-events: none;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 12px rgba(0, 77, 64, 0.2);
+    box-shadow: 0 4px 12px rgba(1, 87, 155, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.1);
     z-index: 1001;
 }
@@ -559,7 +559,7 @@ tr.status-inactive .mono {
     /* Fixed: Uses Teal var */
     stroke: var(--cashier-primary) !important;
     opacity: 1 !important;
-    filter: drop-shadow(0 0 8px rgba(0, 137, 123, 0.4));
+    filter: drop-shadow(0 0 8px rgba(2, 136, 209, 0.4));
     /* Glow effect */
 }
 
@@ -673,7 +673,7 @@ tr.status-inactive .mono {
     background: var(--bg-secondary);
     color: var(--cashier-primary);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 137, 123, 0.1);
+    box-shadow: 0 4px 12px rgba(2, 136, 209, 0.1);
 }
 
 .sidebar-nav {
@@ -752,7 +752,7 @@ tr.status-inactive .mono {
 }
 
 .stat-icon.green {
-    background: linear-gradient(135deg, rgba(0, 137, 123, 0.1), rgba(0, 137, 123, 0.2));
+    background: linear-gradient(135deg, rgba(2, 136, 209, 0.1), rgba(2, 136, 209, 0.2));
     color: var(--cashier-primary);
 }
 
@@ -803,7 +803,7 @@ tr.status-inactive .mono {
     height: 3px;
     background: var(--cashier-primary);
     border-radius: 4px;
-    box-shadow: 0 1px 4px rgba(0, 137, 123, 0.3);
+    box-shadow: 0 1px 4px rgba(2, 136, 209, 0.3);
 }
 
 .sidebar.mini .nav-item.active {
@@ -818,7 +818,7 @@ tr.status-inactive .mono {
     bottom: 4px;
     background: var(--cashier-primary);
     /* Use teal for consistency */
-    box-shadow: 0 1px 4px rgba(0, 137, 123, 0.4);
+    box-shadow: 0 1px 4px rgba(2, 136, 209, 0.4);
 }
 
 .nav-item.active i,
@@ -910,7 +910,7 @@ tr.status-inactive .mono {
 .form-control:focus {
     outline: none;
     border-color: var(--cashier-primary);
-    box-shadow: 0 0 0 3px rgba(0, 137, 123, 0.1);
+    box-shadow: 0 0 0 3px rgba(2, 136, 209, 0.1);
     background: var(--bg-secondary);
 }
 
@@ -1412,7 +1412,7 @@ td .badge[class*="status-"] {
 
 .search-box:focus-within {
     border-color: var(--cashier-primary);
-    box-shadow: 0 0 0 4px rgba(0, 137, 123, 0.1);
+    box-shadow: 0 0 0 4px rgba(2, 136, 209, 0.1);
     transform: translateY(-1px);
 }
 
@@ -1429,7 +1429,7 @@ td .badge[class*="status-"] {
 
 .date-filter:focus-within {
     border-color: var(--cashier-primary);
-    box-shadow: 0 0 0 3px rgba(0, 137, 123, 0.1);
+    box-shadow: 0 0 0 3px rgba(2, 136, 209, 0.1);
 }
 
 .date-filter label {
@@ -1483,7 +1483,7 @@ td .badge[class*="status-"] {
 .filter-select:focus {
     outline: none;
     border-color: var(--cashier-primary);
-    box-shadow: 0 0 0 4px rgba(0, 137, 123, 0.1);
+    box-shadow: 0 0 0 4px rgba(2, 136, 209, 0.1);
 }
 
 /* === RECORDS UI OVERHAUL === */
@@ -1514,7 +1514,7 @@ td .badge[class*="status-"] {
     background: var(--cashier-primary);
     color: white !important;
     border-color: var(--cashier-primary);
-    box-shadow: 0 4px 12px rgba(0, 137, 123, 0.2);
+    box-shadow: 0 4px 12px rgba(2, 136, 209, 0.2);
 }
 
 .group-header {
@@ -1561,7 +1561,7 @@ td .badge[class*="status-"] {
 }
 
 #collectionLogBody tr:not(.group-header-row):hover {
-    background: rgba(0, 137, 123, 0.02) !important;
+    background: rgba(2, 136, 209, 0.02) !important;
     transform: none !important;
 }
 
@@ -1935,7 +1935,7 @@ body.dark-theme .meter-number {
     justify-content: space-between;
     font-weight: 800;
     font-size: 0.95rem;
-    color: #00897b;
+    color: #0288D1;
     /* Cashier primary */
 }
 
@@ -1953,7 +1953,7 @@ body.dark-theme .meter-number {
 }
 
 .sidebar.mini+.main-content .data-table tbody tr:hover {
-    background-color: rgba(0, 137, 123, 0.05) !important;
+    background-color: rgba(2, 136, 209, 0.05) !important;
     /* Subtle teal highlight */
     transform: none !important;
 }
@@ -2851,11 +2851,11 @@ body.dark-theme .meter-number {
 }
 
 .payment-info-card .total-row {
-    background: rgba(0, 137, 123, 0.05);
+    background: rgba(2, 136, 209, 0.05);
     padding: 1rem;
     border-radius: 8px;
     margin-top: 1rem;
-    border: 1px solid rgba(0, 137, 123, 0.1);
+    border: 1px solid rgba(2, 136, 209, 0.1);
 }
 
 .payment-info-card .total-row span {
@@ -2879,4 +2879,79 @@ body.dark-theme .meter-number {
     0% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.15); opacity: 0.7; }
     100% { transform: scale(1); opacity: 1; }
+}
+
+/* === PAGINATION STYLES (Sync with Admin) === */
+.pagination-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.25rem 1.5rem;
+    background: var(--bg-white);
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 16px 16px;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: -1px;
+}
+
+.pagination-info {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.pagination-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.pagination-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-white);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: var(--bg-light);
+    border-color: var(--cashier-primary);
+    color: var(--cashier-primary);
+    transform: translateY(-1px);
+}
+
+.pagination-btn.active {
+    background: var(--cashier-primary);
+    color: white;
+    border-color: var(--cashier-primary);
+    box-shadow: 0 4px 12px rgba(2, 136, 209, 0.2);
+}
+
+.pagination-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: var(--bg-light);
+}
+
+.pagination-ellipsis {
+    color: var(--text-light);
+    font-weight: 600;
+}
+
+@media (max-width: 600px) {
+    .pagination-container {
+        flex-direction: column;
+        text-align: center;
+        gap: 1rem;
+    }
 }

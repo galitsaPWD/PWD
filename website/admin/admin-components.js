@@ -71,7 +71,7 @@ function showCustomerModal() {
                         </div>
                     </div>
 
-                    <form class="premium-form" id="customerForm">
+                    <form class="premium-form" id="customerForm" novalidate>
                         <!-- Step 1: Personal Information -->
                         <div class="modal-step active" id="custStep1">
                             <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
@@ -95,10 +95,24 @@ function showCustomerModal() {
                                         <input type="text" name="middleInitial" placeholder="A" maxlength="1" />
                                     </div>
                                 </div>
-                                <div class="form-group-elegant">
-                                    <label>Contact Number *</label>
-                                    <input type="tel" name="contact" placeholder="09XX XXX XXXX" required />
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant flex-2">
+                                        <label>Contact Number *</label>
+                                        <input type="tel" name="contact" placeholder="09XX XXX XXXX" maxlength="11" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 11)" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-1">
+                                        <label>Age *</label>
+                                        <input type="number" name="age" placeholder="25" min="1" max="150" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 3)" required />
+                                    </div>
                                 </div>
+                            </div>
+                            <div class="stepper-actions">
+                                <button type="button" class="btn-premium-secondary" onclick="closeModal('customerModal')">
+                                    Cancel
+                                </button>
+                                <button type="button" class="btn-premium-primary" id="custBtnNext">
+                                    Next Step <i class="fas fa-arrow-right"></i>
+                                </button>
                             </div>
                         </div>
 
@@ -122,7 +136,7 @@ function showCustomerModal() {
                                     <div class="form-group-elegant">
                                         <label>Customer Type *</label>
                                         <select name="customerType" class="elegant-select" required>
-                                            <option value="residential">Residential / Government</option>
+                                            <option value="residential">Residential</option>
                                             <option value="commercial-a">Semi-Commercial A</option>
                                             <option value="commercial-b">Semi-Commercial B</option>
                                             <option value="commercial-c">Semi-Commercial C</option>
@@ -149,38 +163,27 @@ function showCustomerModal() {
                                         <input type="text" name="meterNumber" placeholder="Serial No." required />
                                     </div>
                                 </div>
-                                <div class="form-row-elegant">
-                                    <div class="form-group-elegant">
-                                        <label>Initial Status</label>
-                                        <select name="status" class="elegant-select">
-                                            <option value="active">Active</option>
-                                            <option value="inactive">Inactive</option>
-                                        </select>
+                                <div class="form-row-elegant" style="display: flex; justify-content: flex-start;">
+                                    <div class="form-group-elegant checkbox-form-group" style="max-width: 300px;">
+                                         <label class="checkbox-label premium-cb" style="padding: 0.75rem 1rem; border-radius: 12px;">
+                                            <input type="checkbox" name="discount" value="true" />
+                                            <div class="cb-text">
+                                                <span class="cb-title" style="font-size: 0.85rem;">Senior Citizen Discount</span>
+                                                <span class="cb-sub" style="font-size: 0.725rem;">Apply ${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 5}% off</span>
+                                            </div>
+                                        </label>
                                     </div>
-                                <div class="form-group-elegant checkbox-form-group" style="margin-top: 0.5rem;">
-                                     <label class="checkbox-label premium-cb" style="padding: 0.5rem; border-radius: 10px;">
-                                        <input type="checkbox" name="discount" value="true" />
-                                        <div class="cb-text">
-                                            <span class="cb-title" style="font-size: 0.85rem;">Senior Citizen Discount</span>
-                                            <span class="cb-sub" style="font-size: 0.7rem;">Apply ${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 20}% off</span>
-                                        </div>
-                                    </label>
                                 </div>
                             </div>
-                        </div> <!-- close form-section -->
+                            <div class="stepper-actions">
+                                <button type="button" class="btn-premium-secondary" id="custBtnBack">
+                                    <i class="fas fa-arrow-left"></i> Back
+                                </button>
+                                <button type="submit" class="btn-premium-primary" id="custBtnSubmit">
+                                    <i class="fas fa-save"></i> Save Customer
+                                </button>
+                            </div>
                         </div> <!-- close custStep2 -->
-
-                        <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.75rem;">
-                            <button type="button" class="btn-premium-secondary" id="custBtnBack" style="display: none; padding: 0.5rem 1rem;">
-                                <i class="fas fa-arrow-left"></i> Back
-                            </button>
-                            <button type="button" class="btn-premium-primary" id="custBtnNext" style="padding: 0.5rem 1.5rem; margin-left: auto;">
-                                Next <i class="fas fa-arrow-right"></i>
-                            </button>
-                            <button type="submit" class="btn-premium-primary" id="custBtnSubmit" style="display: none; margin-left: auto; padding: 0.5rem 1.5rem;">
-                                <i class="fas fa-save"></i> Save Customer
-                            </button>
-                        </div>
                     </form>
                 </div>
             </div>
@@ -207,7 +210,7 @@ function showCustomerModal() {
     function updateStepper() {
         document.querySelectorAll('#customerModal .modal-step').forEach(s => s.classList.remove('active'));
         document.getElementById(`custStep${currentStep}`).classList.add('active');
-
+ 
         document.querySelectorAll('#customerModal .step-item').forEach((item, idx) => {
             if (idx + 1 < currentStep) {
                 item.classList.add('completed');
@@ -219,41 +222,55 @@ function showCustomerModal() {
                 item.classList.remove('active', 'completed');
             }
         });
-
+ 
         fill.style.width = currentStep === 1 ? '0%' : '100%';
-        btnBack.style.display = currentStep === 1 ? 'none' : 'flex';
-        btnNext.style.display = currentStep === totalSteps ? 'none' : 'flex';
-        btnSubmit.style.display = currentStep === totalSteps ? 'flex' : 'none';
     }
-
-    btnNext.addEventListener('click', () => {
-        const step1 = document.getElementById('custStep1');
-        const inputs = step1.querySelectorAll('input[required]');
-        let valid = true;
-        inputs.forEach(i => {
-            if (!i.value) {
-                i.style.borderColor = 'var(--danger)';
-                valid = false;
-            } else {
-                i.style.borderColor = '';
+ 
+    // Attach event delegation for navigation
+    document.getElementById('customerForm').addEventListener('click', (e) => {
+        const nextBtn = e.target.closest('#custBtnNext');
+        const backBtn = e.target.closest('#custBtnBack');
+ 
+        if (nextBtn) {
+            e.preventDefault();
+            const step1 = document.getElementById('custStep1');
+            const inputs = step1.querySelectorAll('input[required]');
+            let valid = true;
+            inputs.forEach(i => {
+                if (!i.value) {
+                    i.style.borderColor = 'var(--danger)';
+                    valid = false;
+                } else {
+                    i.style.borderColor = '';
+                }
+            });
+ 
+            if (!valid) {
+                showNotification('Please fill in all personal details.', 'error');
+                return;
             }
-        });
-
-        if (!valid) {
-            showNotification('Please fill in all personal details.', 'error');
-            return;
+            if (currentStep < totalSteps) {
+                currentStep++;
+                updateStepper();
+            }
         }
-        currentStep++;
-        updateStepper();
-    });
-
-    btnBack.addEventListener('click', () => {
-        currentStep--;
-        updateStepper();
+ 
+        if (backBtn) {
+            e.preventDefault();
+            if (currentStep > 1) {
+                currentStep--;
+                updateStepper();
+            }
+        }
     });
 
     document.getElementById('customerForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        if (!e.target.checkValidity()) {
+            showNotification('Please complete all required fields.', 'error');
+            return;
+        }
         const formData = new FormData(e.target);
         const customer = Object.fromEntries(formData);
         customer.discount = formData.get('discount') === 'true';
@@ -306,7 +323,7 @@ function showStaffModal() {
                         </div>
                     </div>
 
-                    <form class="premium-form" id="staffForm">
+                    <form class="premium-form" id="staffForm" novalidate>
                         <!-- Step 1: Personal Information -->
                         <div class="modal-step active" id="modalStep1">
                             <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
@@ -331,18 +348,31 @@ function showStaffModal() {
                                     </div>
                                 </div>
                                 <div class="form-row-elegant">
-                                    <div class="form-group-elegant">
+                                    <div class="form-group-elegant flex-2">
                                         <label>Role *</label>
                                         <select name="role" class="elegant-select" required>
+                                            <option value="admin">Administrator</option>
                                             <option value="cashier">Cashier</option>
                                             <option value="reader">Meter Reader</option>
                                         </select>
                                     </div>
-                                    <div class="form-group-elegant">
+                                    <div class="form-group-elegant flex-2">
                                         <label>Contact Number *</label>
-                                        <input type="tel" name="contact" placeholder="09XX XXX XXXX" required />
+                                        <input type="tel" name="contact" placeholder="09XX XXX XXXX" maxlength="11" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 11)" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-1">
+                                        <label>Age *</label>
+                                        <input type="number" name="age" placeholder="25" min="1" max="150" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 3)" required />
                                     </div>
                                 </div>
+                            </div>
+                             <div class="stepper-actions">
+                                <button type="button" class="btn-premium-secondary" onclick="closeModal('staffModal')">
+                                    Cancel
+                                </button>
+                                <button type="button" class="btn-premium-primary" id="btnNext">
+                                    Next Step <i class="fas fa-arrow-right"></i>
+                                </button>
                             </div>
                         </div>
 
@@ -376,26 +406,15 @@ function showStaffModal() {
                                         </div>
                                     </div>
                                 </div>
-                                <div class="form-group-elegant" style="margin-top: 0.75rem;">
-                                    <label style="font-size: 0.7rem;">Operational Status</label>
-                                    <select name="status" class="elegant-select" style="padding: 0.6rem 0.875rem; font-size: 0.9rem;">
-                                        <option value="active">Active</option>
-                                        <option value="inactive">Inactive</option>
-                                    </select>
-                                </div>
                             </div>
-                        </div>
-                        
-                        <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.75rem;">
-                            <button type="button" class="btn-premium-secondary" id="btnBack" style="display: none; padding: 0.5rem 1rem;">
-                                <i class="fas fa-arrow-left"></i> Back
-                            </button>
-                            <button type="button" class="btn-premium-primary" id="btnNext" style="padding: 0.5rem 1.5rem; margin-left: auto;">
-                                Next <i class="fas fa-arrow-right"></i>
-                            </button>
-                            <button type="submit" class="btn-premium-primary" id="btnSubmit" style="display: none; margin-left: auto; padding: 0.5rem 1.5rem;">
-                                <i class="fas fa-user-check"></i> Register
-                            </button>
+                             <div class="stepper-actions">
+                                <button type="button" class="btn-premium-secondary" id="btnBack">
+                                    <i class="fas fa-arrow-left"></i> Back
+                                </button>
+                                <button type="submit" class="btn-premium-primary" id="btnSubmit">
+                                    <i class="fas fa-user-check"></i> Register Staff
+                                </button>
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -421,11 +440,11 @@ function showStaffModal() {
 
     function updateStepper() {
         // Handle Content
-        document.querySelectorAll('.modal-step').forEach(s => s.classList.remove('active'));
+        document.querySelectorAll('#staffModal .modal-step').forEach(s => s.classList.remove('active'));
         document.getElementById(`modalStep${currentStep}`).classList.add('active');
 
         // Handle Indicators
-        document.querySelectorAll('.step-item').forEach((item, idx) => {
+        document.querySelectorAll('#staffModal .step-item').forEach((item, idx) => {
             if (idx + 1 < currentStep) {
                 item.classList.add('completed');
                 item.classList.remove('active');
@@ -437,41 +456,48 @@ function showStaffModal() {
             }
         });
 
-        // Handle Progress Bar
+        // Handle Progress Bar bar
         fill.style.width = currentStep === 1 ? '0%' : '100%';
-
-        // Handle Actions
-        btnBack.style.display = currentStep === 1 ? 'none' : 'flex';
-        btnNext.style.display = currentStep === totalSteps ? 'none' : 'flex';
-        btnSubmit.style.display = currentStep === totalSteps ? 'flex' : 'none';
     }
 
-    btnNext.addEventListener('click', () => {
-        // Basic validation for Step 1
-        const step1 = document.getElementById('modalStep1');
-        const inputs = step1.querySelectorAll('input[required], select[required]');
-        let valid = true;
-        inputs.forEach(i => {
-            if (!i.value) {
-                i.style.borderColor = 'var(--danger)';
-                valid = false;
-            } else {
-                i.style.borderColor = '';
-            }
-        });
+    // Attach event delegation for navigation
+    document.getElementById('staffForm').addEventListener('click', (e) => {
+        const nextBtn = e.target.closest('#btnNext');
+        const backBtn = e.target.closest('#btnBack');
 
-        if (!valid) {
-            showNotification('Please fill in all required personal details.', 'error');
-            return;
+        if (nextBtn) {
+            e.preventDefault();
+            // Basic validation for Step 1
+            const step1 = document.getElementById('modalStep1');
+            const inputs = step1.querySelectorAll('input[required], select[required]');
+            let valid = true;
+            inputs.forEach(i => {
+                if (!i.checkValidity()) {
+                    i.style.borderColor = 'var(--danger)';
+                    valid = false;
+                } else {
+                    i.style.borderColor = '';
+                }
+            });
+
+            if (!valid) {
+                showNotification('Please fill in all personal details correctly.', 'error');
+                return;
+            }
+
+            if (currentStep < totalSteps) {
+                currentStep++;
+                updateStepper();
+            }
         }
 
-        currentStep++;
-        updateStepper();
-    });
-
-    btnBack.addEventListener('click', () => {
-        currentStep--;
-        updateStepper();
+        if (backBtn) {
+            e.preventDefault();
+            if (currentStep > 1) {
+                currentStep--;
+                updateStepper();
+            }
+        }
     });
 
     // Dynamic username hint logic
@@ -547,7 +573,8 @@ function showStaffModal() {
                     lastName: formData.get('lastName'),
                     middleInitial: formData.get('middleInitial'),
                     username: username,
-                    contact: formData.get('contact')
+                    contact: formData.get('contact'),
+                    age: formData.get('age')
                 }
             });
 
@@ -689,9 +716,11 @@ async function showAreaBoxModal(box = null) {
         try {
             if (isEdit) await window.dbOperations.updateAreaBox(box.id, data);
             else await window.dbOperations.addAreaBox(data);
+            showNotification(isEdit ? 'Area Box updated!' : 'Area Box created!', 'success');
             closeModal('boxModal');
         } catch (error) {
-            showNotification('Failed to save area box', 'error');
+            console.error('Failed to save area box:', error);
+            showNotification(error.message || 'Failed to save area box.', 'error');
         }
     });
 }
@@ -913,6 +942,7 @@ function editCustomer(customerId, row, cells) {
         address: row.dataset.address || '',
         meterNumber: row.dataset.meterNumber || '',
         contact: row.dataset.contact || '',
+        age: row.dataset.age || '',
         status: (row.dataset.status || 'active').toLowerCase(),
         discount: row.dataset.discount === 'true',
         type: row.dataset.type || 'residential',
@@ -944,7 +974,7 @@ function editCustomer(customerId, row, cells) {
                         </div>
                     </div>
 
-                    <form class="premium-form" id="editCustomerForm">
+                    <form class="premium-form" id="editCustomerForm" novalidate>
                         <div class="modal-step active" id="editCustStep1">
                             <div class="premium-icon-circle" style="width: 36px; height: 36px; font-size: 1rem; margin-bottom: 0.5rem;">
                                 <i class="fas fa-user-edit"></i>
@@ -967,17 +997,23 @@ function editCustomer(customerId, row, cells) {
                                         <input type="text" name="middleInitial" value="${customer.middleInitial}" maxlength="1" />
                                     </div>
                                 </div>
-                                <div class="form-group-elegant">
-                                    <label>Contact Number *</label>
-                                    <input type="tel" name="contact" value="${customer.contact}" required />
+                                <div class="form-row-elegant">
+                                    <div class="form-group-elegant flex-2">
+                                        <label>Contact Number *</label>
+                                        <input type="tel" name="contact" value="${customer.contact}" maxlength="11" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 11)" required />
+                                    </div>
+                                    <div class="form-group-elegant flex-1">
+                                        <label>Age *</label>
+                                        <input type="number" name="age" value="${customer.age}" min="1" max="150" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 3)" required />
+                                    </div>
                                 </div>
                             </div>
-                            <div class="stepper-actions" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: flex-end;">
-                                <button type="button" class="btn-premium-secondary" onclick="closeModal('editCustomerModal')" style="padding: 0.5rem 1rem; margin-right: 0.5rem;">
+                            <div class="stepper-actions">
+                                <button type="button" class="btn-premium-secondary" onclick="closeModal('editCustomerModal')">
                                     Cancel
                                 </button>
-                                <button type="button" class="btn-premium-primary" id="editCustNext" style="padding: 0.5rem 1.5rem;">
-                                    Next <i class="fas fa-arrow-right"></i>
+                                <button type="button" class="btn-premium-primary" id="editCustNext">
+                                    Next Step <i class="fas fa-arrow-right"></i>
                                 </button>
                             </div>
                         </div>
@@ -1000,7 +1036,7 @@ function editCustomer(customerId, row, cells) {
                                     <div class="form-group-elegant">
                                         <label>Customer Type *</label>
                                         <select name="customerType" class="elegant-select" required>
-                                            <option value="residential" ${customer.type === 'residential' ? 'selected' : ''}>Residential / Government</option>
+                                            <option value="residential" ${customer.type === 'residential' ? 'selected' : ''}>Residential</option>
                                             <option value="commercial-a" ${customer.type === 'commercial-a' ? 'selected' : ''}>Semi-Commercial A</option>
                                             <option value="commercial-b" ${customer.type === 'commercial-b' ? 'selected' : ''}>Semi-Commercial B</option>
                                             <option value="commercial-c" ${customer.type === 'commercial-c' ? 'selected' : ''}>Semi-Commercial C</option>
@@ -1040,17 +1076,17 @@ function editCustomer(customerId, row, cells) {
                                         <input type="checkbox" name="discount" value="true" ${customer.discount ? 'checked' : ''} />
                                         <div class="cb-text">
                                             <span class="cb-title" style="font-size: 0.85rem;">Senior Citizen Discount</span>
-                                            <span class="cb-sub" style="font-size: 0.7rem;">Apply ${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 20}% off</span>
+                                            <span class="cb-sub" style="font-size: 0.7rem;">Apply ${window.currentSettings ? (window.currentSettings.discount_percentage || 0) : 5}% off</span>
                                         </div>
                                     </label>
                                 </div>
                             </div>
-                            <div class="stepper-actions" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: flex-end;">
-                                <button type="button" class="btn-premium-secondary" id="editCustBack" style="padding: 0.5rem 1rem; margin-right: 0.5rem;">
+                            <div class="stepper-actions">
+                                <button type="button" class="btn-premium-secondary" id="editCustBack">
                                     <i class="fas fa-arrow-left"></i> Back
                                 </button>
-                                <button type="submit" class="btn-premium-primary" id="editCustSubmit" style="padding: 0.5rem 1.5rem;">
-                                    <i class="fas fa-check-circle"></i> Update
+                                <button type="submit" class="btn-premium-primary" id="editCustSubmit">
+                                    <i class="fas fa-check-circle"></i> Save Changes
                                 </button>
                             </div>
                         </div>
@@ -1103,6 +1139,24 @@ function editCustomer(customerId, row, cells) {
 
         if (nextBtn) {
             e.preventDefault();
+            
+            const step1 = document.getElementById('editCustStep1');
+            const inputs = step1.querySelectorAll('input[required], select[required]');
+            let valid = true;
+            inputs.forEach(i => {
+                if (!i.checkValidity()) {
+                    i.style.borderColor = 'var(--danger)';
+                    valid = false;
+                } else {
+                    i.style.borderColor = '';
+                }
+            });
+
+            if (!valid) {
+                showNotification('Please check personal details.', 'error');
+                return;
+            }
+
             if (currentStep < totalSteps) {
                 currentStep++;
                 updateStepper();
@@ -1120,15 +1174,22 @@ function editCustomer(customerId, row, cells) {
 
     document.getElementById('editCustomerForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        if (!e.target.checkValidity()) {
+            showNotification('Please check all fields.', 'error');
+            return;
+        }
         const formData = new FormData(e.target);
         const updatedCustomer = Object.fromEntries(formData);
         updatedCustomer.discount = formData.get('discount') === 'true';
 
         try {
             await window.dbOperations.updateCustomer(customerId, updatedCustomer);
+            showNotification('Customer updated successfully!', 'success');
             closeModal('editCustomerModal');
         } catch (error) {
             console.error('Failed to update customer:', error);
+            showNotification(error.message || 'Failed to update customer.', 'error');
         }
     });
 }
@@ -1145,6 +1206,7 @@ function editStaff(staffId, row, cells) {
         middleInitial: row.dataset.middleInitial || '',
         role: (row.dataset.role || 'reader').toLowerCase(),
         contact: row.dataset.contact || '',
+        age: row.dataset.age || '',
         status: (row.dataset.status || 'active').toLowerCase()
     };
 
@@ -1163,7 +1225,7 @@ function editStaff(staffId, row, cells) {
                     <h2 class="premium-modal-title" style="font-size: 1.05rem; margin-bottom: 0.1rem;">Edit Staff</h2>
                     <p class="premium-modal-subtitle" style="margin-bottom: 0.75rem; font-size: 0.8rem;">#S${String(staffId).padStart(3, '0')}</p>
 
-                    <form class="premium-form" id="editStaffForm">
+                    <form class="premium-form" id="editStaffForm" novalidate>
                         <div class="form-section no-border">
                             <div class="form-row-elegant">
                                 <div class="form-group-elegant flex-2">
@@ -1195,18 +1257,24 @@ function editStaff(staffId, row, cells) {
                                     </select>
                                 </div>
                             </div>
-                            <div class="form-group-elegant">
-                                <label>Contact Number *</label>
-                                <input type="tel" name="contact" value="${staff.contact}" required />
+                            <div class="form-row-elegant">
+                                <div class="form-group-elegant flex-2">
+                                    <label>Contact Number *</label>
+                                    <input type="tel" name="contact" value="${staff.contact}" maxlength="11" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 11)" required />
+                                </div>
+                                <div class="form-group-elegant flex-1">
+                                    <label>Age *</label>
+                                    <input type="number" name="age" value="${staff.age}" min="1" max="150" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 3)" required />
+                                </div>
                             </div>
                         </div>
 
-                        <div class="stepper-actions" style="margin-top: 0.75rem; padding-top: 0.5rem;">
-                             <button type="button" class="btn-premium-secondary" onclick="closeModal('editStaffModal')" style="padding: 0.5rem 1.25rem;">
+                        <div class="stepper-actions">
+                             <button type="button" class="btn-premium-secondary" onclick="closeModal('editStaffModal')">
                                 Cancel
                             </button>
-                            <button type="submit" class="btn-premium-primary" id="editStaffSubmit" style="padding: 0.5rem 1.5rem; margin-left: auto;">
-                                <i class="fas fa-check-double"></i> Update Staff
+                            <button type="submit" class="btn-premium-primary" id="editStaffSubmit">
+                                <i class="fas fa-check-double"></i> Save Staff
                             </button>
                         </div>
                     </form>
@@ -1226,6 +1294,11 @@ function editStaff(staffId, row, cells) {
 
     document.getElementById('editStaffForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+
+        if (!e.target.checkValidity()) {
+            showNotification('Please check all fields.', 'error');
+            return;
+        }
         const submitBtn = e.target.querySelector('button[type="submit"]');
         const formData = new FormData(e.target);
         const updatedStaff = Object.fromEntries(formData);
@@ -1235,9 +1308,11 @@ function editStaff(staffId, row, cells) {
             submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
 
             await window.dbOperations.updateStaff(staffId, updatedStaff);
+            showNotification('Staff updated successfully!', 'success');
             closeModal('editStaffModal');
         } catch (error) {
             console.error('Failed to update staff:', error);
+            showNotification(error.message || 'Failed to update staff.', 'error');
             submitBtn.disabled = false;
             submitBtn.innerHTML = 'Update Staff';
         }
@@ -1308,3 +1383,59 @@ function closeConfirmModal() {
 
 window.showConfirmModal = showConfirmModal;
 window.closeConfirmModal = closeConfirmModal;
+
+/**
+ * Shared Pagination UI Renderer
+ * @param {string} containerId - Container element ID
+ * @param {number} totalItems - Total number of records
+ * @param {number} currentPage - Current page number (1-indexed)
+ * @param {number} pageSize - Number of items per page
+ * @param {string} onPageChange - Callback function name for page click
+ */
+window.renderPagination = function (containerId, totalItems, currentPage, pageSize, onPageChange) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Ensure it has the correct class for styling
+    container.classList.add('pagination-container');
+
+    const totalPages = Math.ceil(totalItems / pageSize);
+    if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const startIdx = (currentPage - 1) * pageSize + 1;
+    const endIdx = Math.min(currentPage * pageSize, totalItems);
+
+    let html = `
+        <div class="pagination-info">
+            Showing <strong>${startIdx}-${endIdx}</strong> of <strong>${totalItems}</strong> entries
+        </div>
+        <div class="pagination-controls">
+            <button class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="${onPageChange}(${currentPage - 1})">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+    `;
+
+    const delta = 2;
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
+            html += `
+                <button class="pagination-btn ${i === currentPage ? 'active' : ''}" 
+                        onclick="${onPageChange}(${i})">${i}</button>
+            `;
+        } else if (i === (currentPage - delta - 1) || i === (currentPage + delta + 1)) {
+            html += `<span class="pagination-ellipsis">...</span>`;
+        }
+    }
+
+    html += `
+            <button class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="${onPageChange}(${currentPage + 1})">
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+    `;
+
+    container.innerHTML = html;
+};

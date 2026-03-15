@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS system_settings (
     tier2_threshold INTEGER DEFAULT 20,
     tier2_rate DECIMAL(10,2) DEFAULT 20.00,
     tier3_rate DECIMAL(10,2) DEFAULT 25.00,
-    discount_percentage DECIMAL(5,2) DEFAULT 20.00,
+    discount_percentage DECIMAL(5,2) DEFAULT 5.00,
     penalty_percentage DECIMAL(5,2) DEFAULT 10.00,
     cutoff_days INTEGER DEFAULT 30,
     admin_pin VARCHAR(255) DEFAULT '1234',

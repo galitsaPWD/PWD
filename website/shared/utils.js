@@ -133,6 +133,46 @@
     }
 
     /**
+     * Toggles password visibility for a specific input field
+     */
+    function togglePasswordVisibility(inputId, btn) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+
+        const isPassword = input.type === 'password';
+        input.type = isPassword ? 'text' : 'password';
+
+        // Update FontAwesome icon if present
+        const icon = btn.querySelector('i');
+        if (icon) {
+            if (isPassword) {
+                icon.className = icon.className.replace('fa-eye-slash', 'fa-eye');
+                // Support both 'fas' and 'far'
+                if (icon.className.includes('fa-eye')) {
+                   // Ensure it's the right eye icon
+                }
+            } else {
+                icon.className = icon.className.replace('fa-eye', 'fa-eye-slash');
+            }
+        }
+        
+        // Update SVG if present (for landing page compatibility)
+        const svg = btn.querySelector('svg');
+        if (svg) {
+            if (isPassword) {
+                // eye
+                svg.innerHTML = `<path d="M1 9C1 9 4 3 9 3C14 3 17 9 17 9C17 9 14 15 9 15C4 15 1 9 1 9Z" stroke="currentColor" stroke-width="1.5" /><circle cx="9" cy="9" r="2.5" stroke="currentColor" stroke-width="1.5" />`;
+            } else {
+                // eye-slash
+                svg.innerHTML = `<path d="M1 9C1 9 4 3 9 3C14 3 17 9 17 9C17 9 14 15 9 15C4 15 1 9 1 9Z" stroke="currentColor" stroke-width="1.5" /><path d="M14.85 3.15L3.15 14.85" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />`;
+            }
+        }
+
+        // Restore focus
+        input.focus();
+    }
+
+    /**
      * Initializes show/hide password toggles for all password fields
      */
     function initPasswordToggles(containerSelector = 'body') {
@@ -148,7 +188,6 @@
             input.dataset.passwordToggleInit = "true";
 
             // If already has a toggle in its parent wrapper, just attach event
-            // Otherwise wrap it and add the toggle
             let wrapper = input.parentElement;
             if (!wrapper.classList.contains('password-input-wrapper') && 
                 !wrapper.classList.contains('password-wrapper') &&
@@ -160,7 +199,7 @@
             }
 
             // Check if toggle button already exists
-            let toggle = wrapper.querySelector('.toggle-password, .password-toggle, .pass-toggle');
+            let toggle = wrapper.querySelector('.toggle-password, .password-toggle, .pass-toggle, .password-toggle-btn');
             if (!toggle) {
                 toggle = document.createElement('button');
                 toggle.type = 'button';
@@ -170,32 +209,16 @@
                 wrapper.appendChild(toggle);
             }
 
-            toggle.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-
-                // Preserve cursor position and focus
-                const start = input.selectionStart;
-                const end = input.selectionEnd;
-                const isPassword = input.type === 'password';
-
-                input.type = isPassword ? 'text' : 'password';
-
-                // Restore focus and cursor
-                input.focus();
-                if (start !== null && end !== null) {
-                    input.setSelectionRange(start, end);
-                }
-
-                // Update icon (Support Fa-Eye and SVG fallback)
-                const icon = toggle.querySelector('i');
-                if (icon) {
-                    icon.className = isPassword ? 'fas fa-eye-slash' : 'fas fa-eye';
-                } else {
-                    // Fallback for cases where SVG might be present - replace with icon
-                    toggle.innerHTML = `<i class="fas ${isPassword ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
-                }
-            });
+            // Only add listener if not already handled by inline onclick
+            if (!toggle.onclick && !toggle.hasAttribute('onclick')) {
+                toggle.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const inputId = input.id || `pass-${Math.random().toString(36).substr(2, 9)}`;
+                    if (!input.id) input.id = inputId;
+                    togglePasswordVisibility(inputId, toggle);
+                });
+            }
         });
     }
 
@@ -213,52 +236,51 @@
     /**
      * Normalize billing periods strings consistently (e.g. "Mar 2026" -> "March 2026")
      */
-    function getDefaultPeriodLabel() {
-        return new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
-    }
-
     function normalizePeriod(period) {
         if (!period) return null;
-        let str = period.trim().replace(/,/g, '');
+        const str = period.trim();
 
         const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
         const shortNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+        // Handle "MM/DD/YYYY" full date format (e.g., "02/18/2026")
         const dateMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
         if (dateMatch) {
-            const monthIdx = parseInt(dateMatch[1], 10) - 1;
+            const monthIdx = parseInt(dateMatch[1]) - 1;
             if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${dateMatch[3]}`;
         }
 
+        // Try "YYYY-MM-DD" ISO date format (e.g., "2026-02-18")
         const isoDateMatch = str.match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
         if (isoDateMatch) {
-            const monthIdx = parseInt(isoDateMatch[2], 10) - 1;
+            const monthIdx = parseInt(isoDateMatch[2]) - 1;
             if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${isoDateMatch[1]}`;
         }
 
+        // Try "M/YYYY" or "MM/YYYY" (e.g., "2/2026")
         const slashMatch = str.match(/^(\d{1,2})[\/\-\s](\d{4})$/);
         if (slashMatch) {
-            const monthIdx = parseInt(slashMatch[1], 10) - 1;
+            const monthIdx = parseInt(slashMatch[1]) - 1;
             if (monthIdx >= 0 && monthIdx < 12) return `${monthNames[monthIdx]} ${slashMatch[2]}`;
         }
 
+        // Handle string months like "March 2026" or "Mar 2026"
         const words = str.split(/[\s-]+/);
         if (words.length >= 2) {
             const mStr = words[0].toLowerCase();
-            const yStr = words[words.length - 1];
-            const yearMatch = yStr.match(/^(20\d{2})$/);
+            const yStr = words[words.length - 1]; // last word is year
+            const yearMatch = yStr.match(/^20\d{2}$/); // "2026", "2025"
             
             if (yearMatch) {
                 for (let i = 0; i < 12; i++) {
-                    const long = monthNames[i].toLowerCase();
-                    const short = shortNames[i].toLowerCase();
-                    if (mStr === long || mStr === short || (mStr.length >= 3 && mStr.startsWith(short))) {
+                    if (mStr === monthNames[i].toLowerCase() || mStr === shortNames[i].toLowerCase() || mStr.startsWith(shortNames[i].toLowerCase())) {
                         return `${monthNames[i]} ${yStr}`;
                     }
                 }
             }
         }
 
+        // Fallback: capitalize first letter
         if (str.length > 0) {
             return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
         }
@@ -276,11 +298,11 @@
         debounce,
         escapeHTML,
         initPasswordToggles,
-        normalizePeriod,
-        getDefaultPeriodLabel
+        normalizePeriod
     };
 
     // Global overrides for backward compatibility
+    window.togglePasswordVisibility = togglePasswordVisibility;
     window.formatLocalDateTime = formatLocalDateTime;
     window.showNotification = showNotification;
     window.closeModal = closeModal;
@@ -291,5 +313,4 @@
     window.escapeHTML = escapeHTML;
     window.initPasswordToggles = initPasswordToggles;
     window.normalizePeriod = normalizePeriod;
-    window.getDefaultPeriodLabel = getDefaultPeriodLabel;
 })();

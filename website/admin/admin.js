@@ -3,6 +3,13 @@ let customerSortConfig = { key: 'id', order: 'asc' };
 let readingListSortConfig = { key: 'id', order: 'desc' };
 let currentLedgerCustomerId = null; // Track which customer's ledger is open
 
+// Pagination State
+let customerPagination = { page: 1, pageSize: 20 };
+let staffPagination = { page: 1, pageSize: 20 };
+let billingPagination = { page: 1, pageSize: 20 };
+let readingListPagination = { page: 1, pageSize: 20 };
+let ledgerPagination = { page: 1, pageSize: 20 };
+
 function initializeSorting() {
     // Customer Table Sorting
     const customerHeaders = {
@@ -29,8 +36,8 @@ function initializeSorting() {
 
     // Reading List Table Sorting
     const readingHeaders = {
-        'sortReadingAccount': 'id',
-        'sortReadingName': 'last_name',
+        'sortReadingAccount': 'customerId',
+        'sortReadingName': 'fullName',
         'sortReadingDate': 'updated_at'
     };
 
@@ -66,7 +73,9 @@ function updateSortIndicators(tableId, config) {
     }
 }
 
-function refreshCustomers() {
+function refreshCustomers(keepPage = false) {
+    if (!keepPage) customerPagination.page = 1;
+    
     const search = document.getElementById('customerSearch')?.value || '';
     const status = document.getElementById('customerStatusFilter')?.value || '';
     const type = document.getElementById('customerTypeFilter')?.value || '';
@@ -79,17 +88,27 @@ function refreshCustomers() {
             type,
             barangay,
             sortBy: customerSortConfig.key,
-            sortOrder: customerSortConfig.order
+            sortOrder: customerSortConfig.order,
+            page: customerPagination.page,
+            pageSize: customerPagination.pageSize
         });
     }
     return Promise.resolve();
 }
+
+// Pagination Callbacks
+window.onCustomerPageChange = (page) => {
+    customerPagination.page = page;
+    refreshCustomers(true);
+};
 window.refreshCustomers = refreshCustomers; // Allow database.js to call with active filters
 
 /**
  * Trigger refresh of Billing list with current filters
  */
-function refreshBilling() {
+function refreshBilling(keepPage = false) {
+    if (!keepPage) billingPagination.page = 1;
+
     const search = document.getElementById('billingSearch')?.value || '';
     const status = document.getElementById('billingStatusFilter')?.value || '';
     const month = document.getElementById('billingMonthFilter')?.value || '';
@@ -100,12 +119,56 @@ function refreshBilling() {
             search,
             status,
             month,
-            barangay
+            barangay,
+            page: billingPagination.page,
+            pageSize: billingPagination.pageSize
         });
     }
     return Promise.resolve();
 }
+
+// Billing Pagination Callback
+window.onBillingPageChange = (page) => {
+    billingPagination.page = page;
+    refreshBilling(true);
+};
+// Reading List Pagination Callback
+window.onReadingListPageChange = (page) => {
+    readingListPagination.page = page;
+    if (window.updateReadingList) {
+        window.updateReadingList(true);
+    }
+};
+
 window.refreshBilling = refreshBilling;
+
+function refreshStaff(keepPage = false) {
+    if (!keepPage) staffPagination.page = 1;
+    
+    if (window.dbOperations && window.dbOperations.loadStaff) {
+        return window.dbOperations.loadStaff({
+            page: staffPagination.page,
+            pageSize: staffPagination.pageSize
+        });
+    }
+    return Promise.resolve();
+}
+
+window.onStaffPageChange = (page) => {
+    staffPagination.page = page;
+    refreshStaff(true);
+};
+
+window.onLedgerPageChange = (page) => {
+    ledgerPagination.page = page;
+    // We need to call updateLedger but WITHOUT resetting the page to 1
+    // Since initializeLedgerPage scope is private, we'll need to handle this 
+    // by making updateLedger more accessible or just triggering it.
+    // For now, let's look at how initializeLedgerPage works.
+    if (window.dispatchLedgerRefresh) {
+        window.dispatchLedgerRefresh(false);
+    }
+};
 
 /**
  * Trigger refresh of Ledger views (Master or Individual)
@@ -393,9 +456,9 @@ function initializeNavigation() {
                 } else if (pageName === 'customers') {
                     refreshCustomers();
                 } else if (pageName === 'staff') {
-                    await window.dbOperations.loadStaff();
+                    refreshStaff();
                 } else if (pageName === 'billing') {
-                    await refreshBilling();
+                    refreshBilling();
                 } else if (pageName === 'readingList') {
                     const tbody = document.getElementById('readingListTableBody');
                     if (!tbody || tbody.children.length <= 1 || tbody.querySelector('.fa-spinner')) {
@@ -418,7 +481,7 @@ function initializeNavigation() {
             pageTitle.textContent = titles[pageName] || 'Dashboard';
 
             if (pageName === 'ledger') {
-                await initializeLedgerPage();
+                initializeLedgerPage();
             }
 
             if (pageName === 'customers') {
@@ -434,7 +497,7 @@ function initializeNavigation() {
             }
 
             if (pageName === 'readingList') {
-                await initializeReadingListPage();
+                initializeReadingListPage();
             }
         });
     });
@@ -442,7 +505,7 @@ function initializeNavigation() {
 
 let isReadingListUIInitialized = false;
 
-async function initializeReadingListPage() {
+function initializeReadingListPage() {
     if (isReadingListUIInitialized) return;
 
     console.log('🏗️ Initializing Reading List UI...');
@@ -453,11 +516,13 @@ async function initializeReadingListPage() {
     const readerFilter = document.getElementById('readingListReaderFilter');
     const printBtn = document.getElementById('printReadingListBtn');
 
-    // 1. Populate filters (awaited so updateList uses populated values)
-    await populateReadingListFilters();
+    // 1. Populate filters
+    populateReadingListFilters();
 
     // 2. Event Listeners for filters
-    const updateList = async () => {
+    const updateList = async (keepPage = false, isFullList = false) => {
+        if (!keepPage) readingListPagination.page = 1;
+
         const period = periodFilter?.value || '';
         const readerId = readerFilter?.value || '';
         const barangay = barangayFilter?.value || '';
@@ -482,7 +547,10 @@ async function initializeReadingListPage() {
             readerId,
             search,
             sortBy: readingListSortConfig.key,
-            sortOrder: readingListSortConfig.order
+            sortOrder: readingListSortConfig.order,
+            page: readingListPagination.page,
+            pageSize: readingListPagination.pageSize,
+            fullList: isFullList
         });
 
         // 3. Update associated reader name for print
@@ -503,11 +571,8 @@ async function initializeReadingListPage() {
         }
     };
 
-    // Expose update function globally
+    // Expose update function globally for sorting to use
     window.updateReadingList = updateList;
-
-    // 3. Initial Load
-    updateList();
 
     searchInput?.addEventListener('input', debounce(updateList, 300));
     periodFilter?.addEventListener('change', updateList);
@@ -530,7 +595,7 @@ async function initializeReadingListPage() {
 
     // 3. Print Functionality
     if (printBtn) {
-        printBtn.onclick = () => {
+        printBtn.onclick = async () => {
             const period = periodFilter?.value || 'All Periods';
             const barangay = barangayFilter?.value || 'All Barangays';
             const reader = readerFilter?.options[readerFilter.selectedIndex]?.text || 'Not Assigned';
@@ -545,6 +610,9 @@ async function initializeReadingListPage() {
                 showNotification('Tip: Select a Period for a more professional report header.', 'info');
             }
 
+            // Load full list for printing
+            await updateList(true, true);
+
             document.body.classList.add('printing-reading-list');
 
             // Critical: Wait for layout to settle before printing
@@ -555,6 +623,8 @@ async function initializeReadingListPage() {
                 // Cleanup after print dialog closes
                 setTimeout(() => {
                     document.body.classList.remove('printing-reading-list');
+                    // Restore pagination view
+                    updateList(true, false);
                 }, 500);
             }, 800);
         };
@@ -595,32 +665,43 @@ async function populateReadingListFilters() {
         });
     }
 
-    // Populate Periods (fetching from billing table unique periods)
+    // Populate Periods (fetching from billing table unique periods and reading dates)
     if (periodSelect.options.length <= 1) {
         try {
             const { data, error } = await supabase
                 .from('billing')
-                .select('billing_period')
-                .order('billing_period', { ascending: false });
+                .select('billing_period, reading_date, updated_at')
+                .order('reading_date', { ascending: false });
 
             if (error) throw error;
 
-            // Normalize and deduplicate periods
-            const rawPeriods = data.map(b => b.billing_period).filter(Boolean);
+            // FIX: Normalize and deduplicate periods including reading dates
             const normalizedMap = {};
-            rawPeriods.forEach(p => {
-                const key = normalizePeriod(p);
-                if (key && !normalizedMap[key]) {
-                    normalizedMap[key] = p;
+            data.forEach(b => {
+                // Add actual reading date month
+                const rdStr = b.updated_at || b.reading_date;
+                if (rdStr) {
+                    const rdKey = normalizePeriod(formatLocalDateTime(rdStr, false));
+                    if (rdKey && !normalizedMap[rdKey]) {
+                        normalizedMap[rdKey] = rdKey;
+                    }
                 }
             });
+
+            // Ensure current month is always present
+            const now = new Date();
+            const currentMonthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+            if (!normalizedMap[currentMonthLabel]) {
+                normalizedMap[currentMonthLabel] = currentMonthLabel;
+            }
 
             // Clear and repopulate
             periodSelect.innerHTML = '<option value="">All Periods</option>';
             Object.keys(normalizedMap).sort((a, b) => new Date(b) - new Date(a)).forEach(display => {
                 const opt = document.createElement('option');
-                opt.value = display;
+                opt.value = display; // Use normalized display as the value
                 opt.textContent = display;
+                if (display === currentMonthLabel) opt.selected = true; // Default to current month
                 periodSelect.appendChild(opt);
             });
         } catch (error) {
@@ -771,6 +852,7 @@ function handleDelete(button) {
             setTimeout(async () => {
                 try {
                     await deleteFunction(id);
+                    window.showNotification(`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} deleted successfully!`, 'success');
                 } catch (error) {
                     console.error(`Failed to delete ${itemType}:`, error);
                     row.style.opacity = '1';
@@ -1018,7 +1100,7 @@ async function handleViewLedger(button) {
                                         <td>${item.billing_period}</td>
                                         <td>
                                             <div style="display: flex; flex-direction: column;">
-                                                <span>BIL-${String(item.bill_no || item.id).padStart(4, '0')}</span>
+                                                <span>#BIL-${String(item.bill_no || item.id).padStart(4, '0')}</span>
                                                 ${item.receipt_no ? `<span style="font-size: 0.75rem; color: var(--success);">RCP-${new Date(item.payment_date).getFullYear()}-${String(item.receipt_no).padStart(4, '0')}</span>` : ''}
                                             </div>
                                         </td>
@@ -1296,32 +1378,53 @@ window.showPINVerifyModal = function (onConfirm) {
 window.showChangePINModal = function () {
     const modalHTML = `
         <div class="premium-modal-overlay" id="changePINModal">
-            <div class="premium-card">
+            <div class="premium-card compact">
                 <div class="premium-header-accent" style="background: linear-gradient(90deg, #10B981, #059669);"></div>
-                <div class="premium-body">
-                    <div class="premium-icon-circle" style="background: rgba(16, 185, 129, 0.1); color: #10B981;">
-                        <i class="fas fa-key"></i>
+                <div class="premium-body compact">
+                    <button class="modal-close-btn" onclick="closeModal('changePINModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    <div class="premium-icon-circle" style="width: 48px; height: 48px; margin-bottom: 1rem; background: rgba(16, 185, 129, 0.1); color: #10B981;">
+                        <i class="fas fa-key" style="font-size: 1.2rem;"></i>
                     </div>
                     <h3 class="premium-title">Update System PIN</h3>
                     <p class="premium-description">Choose a secure 4-6 digit code</p>
                     
-                    <form class="premium-form" id="changePINForm" style="text-align: left;">
-                        <div class="form-group" style="margin-bottom: 1rem;">
-                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; display: block;">Current PIN</label>
-                            <input type="password" id="currentPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" style="text-align: center; font-size: 1.25rem; letter-spacing: 0.5rem;" />
+                    <form class="premium-form" id="changePINForm">
+                        <div class="compact-form-group">
+                            <label>Current PIN</label>
+                            <div class="password-input-wrapper-elegant">
+                                <input type="password" id="currentPIN" class="premium-input-glass pin-input-premium" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" />
+                                <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('currentPIN', this)">
+                                    <i class="far fa-eye"></i>
+                                </button>
+                            </div>
+                            <div style="text-align: right; margin-top: 4px;">
+                                <a href="#" id="forgotPINLink" class="forgot-link-elegant">Forgot PIN?</a>
+                            </div>
                         </div>
-                        <div class="form-group" style="margin-bottom: 1rem;">
-                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; display: block;">New PIN (4-6 digits)</label>
-                            <input type="password" id="newPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" style="text-align: center; font-size: 1.25rem; letter-spacing: 0.5rem;" />
+                        <div class="compact-form-group">
+                            <label>New PIN (4-6 digits)</label>
+                            <div class="password-input-wrapper-elegant">
+                                <input type="password" id="newPIN" class="premium-input-glass pin-input-premium" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" />
+                                <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('newPIN', this)">
+                                    <i class="far fa-eye"></i>
+                                </button>
+                            </div>
                         </div>
-                        <div class="form-group" style="margin-bottom: 1.5rem;">
-                            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; display: block;">Confirm New PIN</label>
-                            <input type="password" id="confirmPIN" class="form-control" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" style="text-align: center; font-size: 1.25rem; letter-spacing: 0.5rem;" />
+                        <div class="compact-form-group">
+                            <label>Confirm New PIN</label>
+                            <div class="password-input-wrapper-elegant">
+                                <input type="password" id="confirmPIN" class="premium-input-glass pin-input-premium" required maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••" />
+                                <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('confirmPIN', this)">
+                                    <i class="far fa-eye"></i>
+                                </button>
+                            </div>
                         </div>
                         
-                        <div class="premium-actions">
+                        <div class="premium-button-group">
                             <button type="submit" class="btn-premium-confirm" style="background: #10B981;">Update PIN</button>
-                            <button type="button" class="btn-premium-cancel" onclick="closeModal('changePINModal')">Cancel</button>
+                            <button type="button" class="btn-glass-secondary" onclick="closeModal('changePINModal')">Cancel</button>
                         </div>
                     </form>
                 </div>
@@ -1342,6 +1445,13 @@ window.showChangePINModal = function () {
     if (window.initPasswordToggles) {
         window.initPasswordToggles('#changePINModal');
     }
+
+    // Forgot PIN Link
+    document.getElementById('forgotPINLink').addEventListener('click', (e) => {
+        e.preventDefault();
+        closeModal('changePINModal');
+        setTimeout(() => showForgotPINModal(), 350);
+    });
 
     document.getElementById('changePINForm').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -1377,10 +1487,147 @@ window.showChangePINModal = function () {
             }
         } catch (error) {
             console.error('Failed to update PIN:', error);
+            showNotification(error.message || 'Failed to update PIN', 'error');
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
     });
+};
+
+window.showForgotPINModal = function () {
+    const modalHTML = `
+        <div class="premium-modal-overlay" id="forgotPINModal">
+            <div class="premium-card compact">
+                <div class="premium-header-accent" style="background: linear-gradient(90deg, #3B82F6, #2563EB);"></div>
+                <div class="premium-body compact">
+                    <button class="modal-close-btn" onclick="closeModal('forgotPINModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    <div class="premium-icon-circle" style="width: 48px; height: 48px; margin-bottom: 1rem; background: rgba(59, 130, 246, 0.1); color: #3B82F6;">
+                        <i class="fas fa-user-shield" style="font-size: 1.2rem;"></i>
+                    </div>
+                    <h3 class="premium-title">Identity Verification</h3>
+                    <p class="premium-description">Enter admin password to proceed</p>
+                    
+                    <form class="premium-form" id="forgotPINForm">
+                        <div class="compact-form-group" style="margin-bottom: 1.5rem;">
+                            <label>Administrator Password</label>
+                            <div class="password-input-wrapper-elegant">
+                                <input type="password" id="adminPasswordCheck" class="premium-input-glass" required placeholder="••••••••" />
+                                <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('adminPasswordCheck', this)">
+                                    <i class="far fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="premium-button-group">
+                            <button type="submit" class="btn-premium-confirm" style="background: #3B82F6;">Verify Identity</button>
+                            <button type="button" class="btn-glass-secondary" onclick="closeModal('forgotPINModal')">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Activation logic for visibility
+    const modal = document.getElementById('forgotPINModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+
+    if (window.initPasswordToggles) {
+        window.initPasswordToggles('#forgotPINModal');
+    }
+
+    document.getElementById('forgotPINForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const password = document.getElementById('adminPasswordCheck').value;
+        const btn = e.target.querySelector('button[type="submit"]');
+        const originalText = btn.innerHTML;
+        
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
+        btn.disabled = true;
+
+        try {
+            // Get current user email
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error('Session expired. Please log in again.');
+
+            // Verify password by re-authenticating
+            // Note: In a production app, you might have a dedicated RPC for this, 
+            // but signing in again is a common way to verify password client-side if no direct 'verify' endpoint exists.
+            const { error: authError } = await supabase.auth.signInWithPassword({
+                email: user.email,
+                password: password
+            });
+
+            if (authError) {
+                throw new Error('Incorrect password. Identity verification failed.');
+            }
+
+            // Success! Show the current PIN and allow reset
+            const { data: settings, error: sError } = await supabase
+                .from('system_settings')
+                .select('admin_pin')
+                .maybeSingle();
+
+            if (sError) throw sError;
+
+            const currentPIN = (settings && settings.admin_pin && settings.admin_pin !== '$2b$10$YourHashedPINHere') ? settings.admin_pin : '1234';
+
+            // Switch to Success Modal
+            showPINRevealModal(currentPIN);
+
+        } catch (error) {
+            console.error('Verification failed:', error);
+            showNotification(error.message, 'error');
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    });
+};
+
+window.showPINRevealModal = function (pin) {
+    const modalHTML = `
+        <div class="premium-modal-overlay" id="pinRevealModal">
+            <div class="premium-card compact">
+                <div class="premium-header-accent" style="background: linear-gradient(90deg, #10B981, #059669);"></div>
+                <div class="premium-body compact">
+                    <button class="modal-close-btn" onclick="closeModal('pinRevealModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    <div class="premium-icon-circle" style="width: 48px; height: 48px; margin-bottom: 1rem; background: rgba(16, 185, 129, 0.1); color: #10B981;">
+                        <i class="fas fa-check-circle" style="font-size: 1.2rem;"></i>
+                    </div>
+                    <h3 class="premium-title">Identity Verified</h3>
+                    <p class="premium-description">Your current system PIN is active</p>
+                    
+                    <div class="reveal-box-premium">
+                        <span class="reveal-label-premium">Current System PIN</span>
+                        <div class="reveal-value-premium">${pin}</div>
+                    </div>
+                    
+                    <div class="premium-button-group">
+                        <button type="button" class="btn-premium-confirm" onclick="closeModal('pinRevealModal'); setTimeout(() => showChangePINModal(), 350)" style="background: #10B981;">Reset PIN Now</button>
+                        <button type="button" class="btn-glass-secondary" onclick="closeModal('pinRevealModal')">Done</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Activation logic for visibility
+    const modal = document.getElementById('pinRevealModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
 };
 
 async function loadSystemSettingsIntoForm() {
@@ -2077,7 +2324,7 @@ function updateDashboardCharts(data) {
 window.updateDashboardCharts = updateDashboardCharts;
 // === MASTER LEDGER LOGIC ===
 
-async function initializeLedgerPage() {
+function initializeLedgerPage() {
     const barangayFilter = document.getElementById('ledgerBarangayFilter');
     const periodFilter = document.getElementById('ledgerPeriodFilter');
     const searchInput = document.getElementById('ledgerSearch');
@@ -2087,42 +2334,51 @@ async function initializeLedgerPage() {
     populateBarangayFilters('ledgerBarangayFilter');
 
     // Populate Period filter from billing data
-    await populateLedgerPeriodFilter();
+    populateLedgerPeriodFilter();
 
     // Event Listeners
-    const updateLedger = () => {
+    const updateLedger = (resetPage = true) => {
+        if (resetPage) ledgerPagination.page = 1;
         window.dbOperations.loadMasterLedger({
             barangay: barangayFilter?.value || '',
             search: searchInput?.value || '',
-            period: periodFilter?.value || ''
+            period: periodFilter?.value || '',
+            page: ledgerPagination.page,
+            pageSize: ledgerPagination.pageSize
         });
     };
+
+    // Expose updateLedger for pagination callback
+    window.dispatchLedgerRefresh = updateLedger;
 
     barangayFilter?.addEventListener('change', updateLedger);
     periodFilter?.addEventListener('change', updateLedger);
     searchInput?.addEventListener('input', debounce(updateLedger, 300));
 
     // Print Logic
-    document.getElementById('printLedgerBtn').onclick = () => {
+    document.getElementById('printLedgerBtn').onclick = async () => {
         const printDate = document.querySelector('.print-date');
         if (printDate) {
             printDate.textContent = `Generated on: ${formatLocalDateTime(new Date())}`;
         }
         
+        // Load full list for printing
+        await window.dbOperations.loadMasterLedger({
+            barangay: barangayFilter?.value || '',
+            search: searchInput?.value || '',
+            period: periodFilter?.value || '',
+            fullList: true
+        });
+
         // Add printing class to body for specialized CSS
         document.body.classList.add('printing-ledger');
         
-        // If viewing an individual card, add a specific class to handle card-only print styles
-        const isDetailView = document.getElementById('ledgerDetailView').style.display === 'block';
-        if (isDetailView) {
-            document.body.classList.add('printing-ledger-card');
-        }
-        
         window.print();
-        
-        // Clean up
+
         document.body.classList.remove('printing-ledger');
-        document.body.classList.remove('printing-ledger-card');
+        
+        // Restore pagination view
+        updateLedger(false);
     };
 
     // Detail View Controls
@@ -2198,19 +2454,19 @@ async function populateLedgerPeriodFilter() {
     try {
         const { data, error } = await supabase
             .from('billing')
-            .select('billing_period');
+            .select('reading_date, updated_at');
 
         if (error) throw error;
 
-        // Normalize all raw values and deduplicate by normalized key
-        // e.g. '02/25/2026', '02/24/2026', 'February 2026' all → 'February 2026'
-        const normalizedMap = {}; // normalized display → first matching raw value
+        // Normalize and deduplicate by reading date month
+        const normalizedMap = {};
         data.forEach(b => {
-            const raw = b.billing_period;
-            if (!raw) return;
-            const key = typeof normalizePeriod === 'function' ? normalizePeriod(raw) : raw;
-            if (key && !normalizedMap[key]) {
-                normalizedMap[key] = raw;
+            const rdStr = b.updated_at || b.reading_date;
+            if (rdStr) {
+                const key = normalizePeriod(formatLocalDateTime(rdStr, false));
+                if (key && !normalizedMap[key]) {
+                    normalizedMap[key] = key;
+                }
             }
         });
 
@@ -2218,12 +2474,8 @@ async function populateLedgerPeriodFilter() {
         const sortedKeys = Object.keys(normalizedMap).sort((a, b) => new Date(b) - new Date(a));
 
         const currentVal = select.value;
-        
         select.innerHTML = '<option value="">All Periods</option>' +
-            sortedKeys.map(display => {
-                const isSelected = display === currentVal;
-                return `<option value="${display}" ${isSelected ? 'selected' : ''}>${display}</option>`;
-            }).join('');
+            sortedKeys.map(display => `<option value="${display}" ${display === currentVal ? 'selected' : ''}>${display}</option>`).join('');
     } catch (e) {
         console.error('Could not populate ledger period filter:', e);
     }
@@ -2774,4 +3026,149 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
+});
+
+// === AUDIT TRAIL LOGIC ===
+let logsPagination = { page: 1, pageSize: 20 };
+
+async function loadAuditLogs(options = {}) {
+    const tbody = document.getElementById('logsTableBody');
+    if (!tbody) return;
+
+    const search = options.search || document.getElementById('logSearch')?.value || '';
+    const action = options.action || document.getElementById('logActionFilter')?.value || '';
+    const module = options.module || document.getElementById('logModuleFilter')?.value || '';
+    const dateFrom = options.dateFrom || document.getElementById('logDateFrom')?.value || '';
+    const dateTo = options.dateTo || document.getElementById('logDateTo')?.value || '';
+    
+    const page = options.page || logsPagination.page;
+    const pageSize = options.pageSize || logsPagination.pageSize;
+
+    try {
+        let query = supabase
+            .from('audit_logs')
+            .select('*', { count: 'exact' });
+
+        // Apply filters
+        if (action) query = query.eq('action_type', action);
+        if (module) query = query.eq('entity_type', module);
+        
+        if (dateFrom) {
+            const startDate = new Date(dateFrom);
+            startDate.setHours(0, 0, 0, 0);
+            query = query.gte('created_at', startDate.toISOString());
+        }
+        
+        if (dateTo) {
+            const endDate = new Date(dateTo);
+            endDate.setHours(23, 59, 59, 999);
+            query = query.lte('created_at', endDate.toISOString());
+        }
+
+        if (search) {
+            query = query.or(`staff_name.ilike.%${search}%,details.ilike.%${search}%,entity_id.ilike.%${search}%`);
+        }
+
+        // Apply pagination and sorting
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+
+        query = query.order('created_at', { ascending: false }).range(from, to);
+
+        const { data, error, count } = await query;
+
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 2rem; color: #9E9E9E;">No audit logs found.</td></tr>';
+            if (window.renderPagination) window.renderPagination('logsPagination', 0, page, pageSize, 'onLogsPageChange');
+            return;
+        }
+
+        tbody.innerHTML = data.map(log => {
+            const date = formatLocalDateTime(log.created_at, true);
+            let actionBadgeClass = 'info';
+            switch (log.action_type) {
+                case 'CREATE': actionBadgeClass = 'success'; break;
+                case 'UPDATE': actionBadgeClass = 'primary'; break;
+                case 'DELETE': actionBadgeClass = 'danger'; break;
+                case 'PAYMENT': actionBadgeClass = 'warning'; break;
+            }
+
+            return `
+                <tr>
+                    <td class="activity-date">${date}</td>
+                    <td><strong>${log.staff_name}</strong> <span style="font-size: 0.8rem; color: #888;">(${log.role})</span></td>
+                    <td><span class="badge gray" style="text-transform: capitalize;">${log.entity_type}</span></td>
+                    <td><span class="badge ${actionBadgeClass}">${log.action_type}</span></td>
+                    <td>${log.details}</td>
+                </tr>
+            `;
+        }).join('');
+
+        if (window.renderPagination) {
+            window.renderPagination('logsPagination', count, page, pageSize, 'onLogsPageChange');
+        }
+
+    } catch (error) {
+        console.error('Error loading audit logs:', error);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-danger center">Failed to load audit logs.</td></tr>';
+    }
+}
+
+window.onLogsPageChange = (page) => {
+    logsPagination.page = page;
+    loadAuditLogs();
+};
+
+function initializeLogsPage() {
+    // Add event listeners to filters
+    const searchInput = document.getElementById('logSearch');
+    const filters = ['logActionFilter', 'logModuleFilter', 'logDateFrom', 'logDateTo'];
+
+    if (searchInput) {
+        searchInput.addEventListener('input', window.debounce ? window.debounce(() => {
+            logsPagination.page = 1;
+            loadAuditLogs();
+        }, 500) : () => {
+            logsPagination.page = 1;
+            loadAuditLogs();
+        });
+    }
+
+    filters.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', () => {
+                logsPagination.page = 1;
+                loadAuditLogs();
+            });
+        }
+    });
+
+    // Handle Page load triggering
+    document.querySelectorAll('.nav-item').forEach(link => {
+        link.addEventListener('click', (e) => {
+            const pageId = e.currentTarget.getAttribute('data-page');
+            if (pageId === 'logs') {
+                loadAuditLogs();
+            }
+        });
+    });
+
+    // Realtime subscription for audit_logs
+    if (window.subscribeToTable) {
+        window.subscribeToTable('audit_logs', (payload) => {
+            console.log('[Realtime] ⚡ Audit log event:', payload.eventType);
+            // Only auto-refresh if the logs page is currently visible
+            const logsPage = document.getElementById('logsPage');
+            if (logsPage && logsPage.style.display !== 'none') {
+                loadAuditLogs();
+            }
+        });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initializeLogsPage();
 });
